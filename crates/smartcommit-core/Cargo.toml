@@ -1,0 +1,10 @@
+[package]
+name = "smartcommit-core"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "smartcommit_core"
+path = "src/lib.rs"
+
+[dependencies]
