@@ -1,75 +1,76 @@
-# PROJECT_STATE
+# SmartCommit — Project State
 
-## Current version
-v0.1-dev (pre-release, Git Splitter milestone)
+This file tracks exact progress against the module build order in
+`modules.md` (the module-by-module AI development prompts). Update
+it at the end of every module.
 
-## Current milestone
-v0.1 — Git Splitter (MVP, deterministic only, no AI)
+## Note on prior history
 
-## Completed features
-- Project scaffolded with `cargo new smartcommit --bin`
-- Git Engine: `is_git_repository(path)` — detects whether a given
-  path is inside a Git working tree, via `git rev-parse
-  --is-inside-work-tree` shelled out to the system `git` binary
-  - Returns `Ok(true)` / `Ok(false)` / `Err(GitEngineError)`
-    (the Err case is reserved for "git binary itself could not be
-    run", not "not a repo")
-  - Unit tests: real temp git repo → true; plain temp dir → false
-    (both passing as of this writing, verified with `cargo test`)
-  - CLI wired up in `main.rs`: prints result, sets exit code
-    (0 = repo detected, 1 = not a repo or git unavailable),
-    manually verified against both a real repo and `/tmp`
+An earlier, non-workspace prototype (single binary crate shelling
+out to `git` for repo-detection and staged-changes listing) was
+built before `modules.md` was provided. That prototype is **not**
+part of this codebase going forward — Module 0 of `modules.md`
+specifies a `smartcommit-core` / `smartcommit-cli` workspace split,
+and Module 0 explicitly says not to implement Git behavior during
+scaffolding. The prototype's logic will be re-introduced, reshaped
+to the APIs `modules.md` specifies (`Repository::discover`,
+`ChangedFile`/`ChangeKind`, etc.), during Module 1 and Module 3
+respectively — not copied in as-is.
 
-## Current feature
-Nothing in progress — step 1 of the v0.1 MVP checklist is done and
-tested. Next unstarted step is staged-changes detection.
+## Note on missing context file
 
-## Known bugs
-None identified yet (surface area is still tiny).
+`modules.md`'s general instructions say to read
+`AI_DEVELOPMENT_CONTEXT.md` if it exists. It was not provided along
+with `modules.md`, `README.md`, or `ARCHITECTURE.md`. If it exists
+in the developer's actual repository, please share it — it may
+contain rules (an earlier `PROJECT_STATE.md` referenced "section 38"
+of it) that should apply from here on.
 
-## Architecture decisions
-- **ADR-001 (informal, not yet in docs/adr/):** MVP shells out to
-  the system `git` CLI via `std::process::Command` instead of
-  linking `git2` (libgit2 bindings).
-  - Reason: repo detection is trivial via CLI; `git2` adds real
-    dependency weight (links libgit2, larger build, requires libgit2
-    dev headers) for no benefit at this stage.
-  - **Revisit in v0.2** when we need staged-diff retrieval and
-    hunk-level parsing — reliably parsing `git diff` text output
-    gets fragile fast, and `git2` gives structured diff/hunk objects
-    instead. Decide then whether to switch the whole Git Engine to
-    `git2` or keep CLI-shelling for simple ops and add `git2` only
-    for diff parsing.
+## Completed modules
 
-## Pending tasks (v0.1 MVP checklist, in order)
-1. ✅ Detect Git repository
-2. ⬜ Detect staged changes (`git diff --cached --name-status` or
-   equivalent)
-3. ⬜ Read staged diff content
-4. ⬜ Read multiline commit messages (from stdin/file/flag — format TBD)
-5. ⬜ Parse messages into individual logical messages
-6. ⬜ Identify modified files (from step 2/3 output)
-7. ⬜ Match messages to files (basic deterministic logic — e.g. order-based
-   or keyword-based, NOT semantic/AI yet)
-8. ⬜ Group files
-9. ⬜ Display proposed commits (preview output)
-10. ⬜ Developer approval step (interactive confirm)
-11. ⬜ Create separate commits
-12. ⬜ Configurable time differences between commits
-13. ⬜ Recovery checkpoint (backup branch) before modifying history
+### Module 0 — Rust Workspace Foundation ✅
 
-## Important configuration
-None yet — no config file schema decided (deferred per section 38
-of AI_DEVELOPMENT_CONTEXT.md, "do not finalize until implementation
-begins").
+- Cargo workspace with two crates:
+  - `smartcommit-core` (library) — no dependencies yet
+  - `smartcommit-cli` (binary) — depends on `smartcommit-core` and
+    `clap` (derive API, pinned to `=4.4.18` for build-environment
+    compatibility during development; adjust if unnecessary in the
+    developer's own toolchain)
+- Directory layout: `crates/`, `tests/`, `fixtures/`, `docs/`,
+  `Cargo.toml`, `README.md`, `ARCHITECTURE.md`, `PROJECT_STATE.md`
+- Placeholder shared types in `smartcommit-core`: `RepositoryInfo`,
+  `ChangedFile`, `CommitMessage`, `CommitPlan` — deliberately
+  unfilled; fields are added by the module that actually needs them
+  (Modules 1, 3, 5, 7 respectively)
+- CLI: `smartcommit --version`, `smartcommit --help` both work; no
+  subcommands yet
+- Tests: 1 unit test in `smartcommit-core` (placeholder types
+  construct), 2 integration tests in `smartcommit-cli` (`--version`
+  and `--help` both exit 0 with expected output)
+- `cargo build --workspace` and `cargo test --workspace` both
+  succeed (3 tests passed, 0 failed)
 
-## Last successful test
-`cargo test` — 2 passed, 0 failed (git_engine::tests::detects_true_inside_a_real_git_repo,
-git_engine::tests::detects_false_in_a_plain_directory)
+## Current module
 
-## Next task
-Step 2 of the MVP checklist: staged-changes detection — a function
-in `git_engine.rs` that lists staged files (path + status: added /
-modified / deleted / renamed) via `git diff --cached --name-status`,
-with unit tests using a temp repo with staged changes in each
-status category.
+Nothing in progress. Module 0 is complete and verified.
+
+## Next module
+
+Module 1 — Git Repository Detection. Will implement
+`Repository::discover(path)` (or equivalent) in `smartcommit-core`,
+supporting: current directory, explicit `--repo` path, nested
+directory inside a repo, and repository-root detection. Exposes
+repository root, `.git` location, and bare-repo status. CLI gets a
+`smartcommit doctor` subcommand that reports repository detection
+only (state inspection is Module 2). This reuses the *logic* proven
+in the earlier prototype's `is_git_repository` check, adapted to the
+`Repository::discover` API shape and moved into `smartcommit-core`.
+
+## Last successful verification
+
+```text
+cargo build --workspace   → success
+cargo test --workspace    → 3 passed, 0 failed
+smartcommit --version     → "smartcommit 0.1.0"
+smartcommit --help        → usage text printed, exit 0
+```
