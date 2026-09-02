@@ -8,3 +8,4 @@ name = "smartcommit_core"
 path = "src/lib.rs"
 
 [dependencies]
+thiserror = "1"
