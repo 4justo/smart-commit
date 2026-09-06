@@ -1,13 +1,14 @@
 //! SmartCommit CLI binary.
 //!
-//! # Module 3 status
-//! Adds the `analyze` subcommand, which lists staged files only —
-//! diff content (hunks, additions/deletions) is Module 4's scope.
+//! # Module 4 status
+//! `analyze` now shows a diff summary (+additions -deletions, hunk
+//! count, or "Binary file changed") per staged file. `--verbose`
+//! additionally prints full hunk content.
 
 use clap::{Parser, Subcommand};
 use smartcommit_core::{
-    inspect_repository_state, get_staged_changes, ChangeKind, InspectorError, RepositoryError,
-    RepositorySafety, StagedChangesError,
+    get_staged_changes, get_staged_diffs, inspect_repository_state, ChangeKind, DiffLine,
+    FileDiff, InspectorError, RepositoryError, RepositorySafety, StagedChangesError,
 };
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -34,11 +35,14 @@ enum Commands {
     /// in-progress merge/rebase/cherry-pick, conflicts, and
     /// staged/unstaged/untracked status.
     Doctor,
-    /// List currently staged files and their change kind.
-    ///
-    /// Module 3 scope: the staged file list only. Diff content
-    /// (hunks, additions/deletions) arrives in Module 4.
-    Analyze,
+    /// List currently staged files, their change kind, and a diff
+    /// summary (or full hunk content with --verbose).
+    Analyze {
+        /// Print full hunk content (added/removed/context lines)
+        /// for every non-binary file, not just the summary.
+        #[arg(long)]
+        verbose: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -46,7 +50,7 @@ fn main() -> ExitCode {
 
     match cli.command {
         Commands::Doctor => run_doctor(cli.repo),
-        Commands::Analyze => run_analyze(cli.repo),
+        Commands::Analyze { verbose } => run_analyze(cli.repo, verbose),
     }
 }
 
@@ -114,66 +118,110 @@ fn run_doctor(repo_path: Option<PathBuf>) -> ExitCode {
     }
 }
 
-fn run_analyze(repo_path: Option<PathBuf>) -> ExitCode {
+fn run_analyze(repo_path: Option<PathBuf>, verbose: bool) -> ExitCode {
     let target = match resolve_target(repo_path) {
         Ok(t) => t,
         Err(code) => return code,
     };
 
-    match get_staged_changes(&target) {
+    let files = match get_staged_changes(&target) {
         Ok(files) if files.is_empty() => {
             println!("No staged changes found.");
-            ExitCode::FAILURE
+            return ExitCode::FAILURE;
         }
-        Ok(files) => {
-            println!("Staged changes: {}", files.len());
-            println!();
-            for file in &files {
-                let label = match file.change_kind {
-                    ChangeKind::Added => "Added",
-                    ChangeKind::Modified => "Modified",
-                    ChangeKind::Deleted => "Deleted",
-                    ChangeKind::Renamed => "Renamed",
-                };
-                match (&file.change_kind, &file.old_path) {
-                    (ChangeKind::Renamed, Some(old)) => {
-                        println!(
-                            "{label:<9} {} -> {}",
-                            old.display(),
-                            file.path.display()
-                        );
-                    }
-                    _ => {
-                        println!("{label:<9} {}", file.path.display());
-                    }
+        Ok(files) => files,
+        Err(e) => return report_staged_changes_error(e),
+    };
+
+    // A diff-extraction failure shouldn't hide the file list we
+    // already have from get_staged_changes — fall back to listing
+    // files without diff stats rather than losing the whole
+    // command's output over a secondary failure.
+    let diffs = match get_staged_diffs(&target) {
+        Ok(diffs) => diffs,
+        Err(e) => {
+            eprintln!("Warning: could not extract diff content ({e}); showing file list only.");
+            Vec::new()
+        }
+    };
+
+    println!("Staged changes: {}", files.len());
+    println!();
+    for file in &files {
+        let label = match file.change_kind {
+            ChangeKind::Added => "Added",
+            ChangeKind::Modified => "Modified",
+            ChangeKind::Deleted => "Deleted",
+            ChangeKind::Renamed => "Renamed",
+        };
+        match (&file.change_kind, &file.old_path) {
+            (ChangeKind::Renamed, Some(old)) => {
+                println!("{label:<9} {} -> {}", old.display(), file.path.display());
+            }
+            _ => {
+                println!("{label:<9} {}", file.path.display());
+            }
+        }
+
+        if let Some(diff) = diffs.iter().find(|d| d.path == file.path) {
+            print_diff_summary(diff, verbose);
+        }
+        println!();
+    }
+
+    ExitCode::SUCCESS
+}
+
+fn print_diff_summary(diff: &FileDiff, verbose: bool) {
+    if diff.is_binary {
+        println!("  Binary file changed");
+        return;
+    }
+
+    println!("  +{} -{}", diff.additions, diff.deletions);
+    println!(
+        "  {} hunk{}",
+        diff.hunks.len(),
+        if diff.hunks.len() == 1 { "" } else { "s" }
+    );
+
+    if verbose {
+        for hunk in &diff.hunks {
+            println!("  {}", hunk.header);
+            for line in &hunk.lines {
+                match line {
+                    DiffLine::Added(text) => println!("  +{text}"),
+                    DiffLine::Removed(text) => println!("  -{text}"),
+                    DiffLine::Context(text) => println!("   {text}"),
                 }
             }
-            ExitCode::SUCCESS
         }
-        Err(StagedChangesError::Repository(RepositoryError::NotARepository(_))) => {
+    }
+}
+
+fn report_staged_changes_error(err: StagedChangesError) -> ExitCode {
+    match err {
+        StagedChangesError::Repository(RepositoryError::NotARepository(_)) => {
             println!("No Git repository found.");
             ExitCode::FAILURE
         }
-        Err(StagedChangesError::Repository(RepositoryError::PathNotFound(path))) => {
+        StagedChangesError::Repository(RepositoryError::PathNotFound(path)) => {
             eprintln!("Path does not exist: {}", path.display());
             ExitCode::FAILURE
         }
-        Err(StagedChangesError::Repository(RepositoryError::PathNotAccessible {
-            path,
-            reason,
-        })) => {
+        StagedChangesError::Repository(RepositoryError::PathNotAccessible { path, reason }) => {
             eprintln!("Path is not accessible: {} ({reason})", path.display());
             ExitCode::FAILURE
         }
-        Err(StagedChangesError::Repository(RepositoryError::GitUnavailable(msg)))
-        | Err(StagedChangesError::GitUnavailable(msg)) => {
+        StagedChangesError::Repository(RepositoryError::GitUnavailable(msg))
+        | StagedChangesError::GitUnavailable(msg) => {
             eprintln!("Unable to run 'git': {msg}");
             eprintln!();
             eprintln!("Possible causes:");
             eprintln!("- git is not installed or not on PATH");
             ExitCode::FAILURE
         }
-        Err(StagedChangesError::CommandFailed(msg)) => {
+        StagedChangesError::CommandFailed(msg) => {
             eprintln!("Unable to read staged changes.");
             eprintln!();
             eprintln!("Details: {msg}");

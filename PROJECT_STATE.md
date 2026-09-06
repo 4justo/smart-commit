@@ -108,24 +108,68 @@ it at the end of every module.
   a clean rename with old_path shown, empty staging area, unstaged+
   untracked-only (correctly excluded), non-repo directory
 
+### Module 4 — Diff Extraction Engine ✅
+
+- `smartcommit-core::get_staged_diffs(path)` — extracts the staged
+  diff (HEAD vs. index) for every changed file via a single
+  `git diff --cached -M --no-color --no-ext-diff` call, then parses
+  the unified-diff text into structured `FileDiff`/`DiffHunk`/
+  `DiffLine` values itself
+- **Important implementation detail:** an earlier version called
+  `git diff --cached -M -- <path>` once per file (mirroring Module
+  3's per-file model). That breaks rename detection — restricting
+  the diff to a single pathspec stops git from pairing the old and
+  new sides of a rename, so a genuine rename gets reported as a
+  delete+add instead. Renames can only be detected correctly when
+  git sees the *entire* staged change set at once. So this module
+  runs the diff exactly once (no pathspec) and splits the result
+  into per-file blocks itself, matching Module 3's `-M` usage so the
+  two stay consistent. A regression test
+  (`correctly_diffs_a_rename_alongside_other_changes`) locks this in
+- `FileDiff { path, hunks, additions, deletions, is_binary }`;
+  `DiffHunk { header, lines }`; `DiffLine::{Context, Added, Removed}`
+  with the git diff-line prefix already stripped
+- Binary files are detected via git's own `Binary files a/X and b/Y
+  differ` marker line — `is_binary` is set true, `hunks` stays
+  empty, binary content is never parsed as text
+- File path is extracted from the `diff --git a/<path> b/<path>`
+  header (split on the first `" b/"` after the `"a/"` prefix) —
+  documented as a known limitation for the rare case of a path
+  containing the literal substring `" b/"`, consistent with how most
+  diff parsers handle this
+- CLI: `smartcommit analyze` gains a per-file diff summary (`+N -M`,
+  hunk count, or `Binary file changed`); new `--verbose` flag prints
+  full hunk content (each line prefixed `+`/`-`/` `) for non-binary
+  files
+- If diff extraction itself fails, `analyze` still shows the file
+  list from Module 3 (with a warning on stderr) rather than losing
+  the whole command's output over a secondary failure
+- Tests: 7 unit tests — text modification, new file, deleted file,
+  multiple hunks in one file, binary file, hand-countable line
+  counts, and the rename-alongside-other-changes regression test
+- Manually verified: mixed add/modify/delete set (both plain and
+  `--verbose`), a binary file, and an unmodified rename (0 hunks,
+  correctly still identified as a rename rather than a 20-line
+  delete+add)
+
 ## Current module
 
-Nothing in progress. Module 3 is complete and verified.
+Nothing in progress. Module 4 is complete and verified.
 
 ## Next module
 
-Module 4 — Diff Extraction Engine. For every `ChangedFile`, extract
-the staged diff (HEAD vs. index) as hunks — `FileDiff { path, hunks,
-additions, deletions }`, `DiffHunk { header, lines }`. Must detect
-and skip binary files rather than treating their content as text.
-`smartcommit analyze` gains `+N -M` / hunk-count summary output per
-file.
+Module 5 — Multiline Commit Message Parser. Converts developer-
+supplied multiline text into individual commit messages
+(blank-line-separated, trimming whitespace, handling CRLF/LF,
+ignoring empty entries). No AI. CLI: `smartcommit plan
+--messages-file commits.txt` (new command; doesn't touch `analyze`
+or `doctor`).
 
 ## Last successful verification
 
 ```text
 cargo build --workspace   → success
-cargo test --workspace    → 21 passed, 0 failed (2 CLI + 19 core)
-smartcommit doctor  → full state report (branch/HEAD/staged/unstaged/untracked/safety)
-smartcommit analyze → staged file list with change kind, or "No staged changes found." + exit 1
+cargo test --workspace    → 28 passed, 0 failed (2 CLI + 26 core)
+smartcommit analyze            → per-file diff summary (+N -M, hunk count, or Binary file changed)
+smartcommit analyze --verbose  → additionally prints full hunk content
 ```

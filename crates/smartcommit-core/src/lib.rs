@@ -4,10 +4,12 @@
 //! This crate must remain usable without AI/an external LLM, and
 //! must not depend on `smartcommit-cli`.
 
+mod diff;
 mod repository;
 mod repository_state;
 mod staged_changes;
 
+pub use diff::{get_staged_diffs, DiffError, DiffHunk, DiffLine, FileDiff};
 pub use repository::{Repository, RepositoryError, RepositoryInfo};
 pub use repository_state::{
     inspect_repository_state, InspectorError, RepositorySafety, RepositoryState,
