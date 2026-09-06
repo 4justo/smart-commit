@@ -5,12 +5,14 @@
 //! must not depend on `smartcommit-cli`.
 
 mod repository;
+mod repository_state;
+mod staged_changes;
 
 pub use repository::{Repository, RepositoryError, RepositoryInfo};
-
-/// Placeholder for a single changed file (path + change kind).
-/// Fields land in Module 3 — Staged Change Discovery.
-pub struct ChangedFile;
+pub use repository_state::{
+    inspect_repository_state, InspectorError, RepositorySafety, RepositoryState,
+};
+pub use staged_changes::{get_staged_changes, ChangeKind, ChangedFile, StagedChangesError};
 
 /// Placeholder for one parsed, developer-supplied commit message.
 /// Fields land in Module 5 — Multiline Commit Message Parser.
@@ -23,13 +25,13 @@ pub struct CommitPlan;
 #[cfg(test)]
 mod tests {
     // Compile-time smoke test: the remaining placeholder types exist
-    // and are constructible. RepositoryInfo is no longer a
-    // placeholder as of Module 1 — see repository.rs for its tests.
+    // and are constructible. RepositoryInfo, RepositoryState, and
+    // ChangedFile are no longer placeholders — see their own modules
+    // for tests.
     use super::*;
 
     #[test]
     fn placeholder_types_are_constructible() {
-        let _ = ChangedFile;
         let _ = CommitMessage;
         let _ = CommitPlan;
     }
