@@ -154,22 +154,19 @@ it at the end of every module.
 
 ## Current module
 
-Nothing in progress. Module 4 is complete and verified.
+Nothing in progress. Module 5 is complete and verified.
 
 ## Next module
 
-Module 5 — Multiline Commit Message Parser. Converts developer-
-supplied multiline text into individual commit messages
-(blank-line-separated, trimming whitespace, handling CRLF/LF,
-ignoring empty entries). No AI. CLI: `smartcommit plan
---messages-file commits.txt` (new command; doesn't touch `analyze`
-or `doctor`).
+Module 6 — Basic Deterministic File Matcher. Will score staged files
+against parsed commit messages using deterministic evidence such as
+filenames, directories, extensions, diff keywords, and normalized
+tokens. No AI.
 
 ## Last successful verification
 
 ```text
 cargo build --workspace   → success
-cargo test --workspace    → 28 passed, 0 failed (2 CLI + 26 core)
-smartcommit analyze            → per-file diff summary (+N -M, hunk count, or Binary file changed)
-smartcommit analyze --verbose  → additionally prints full hunk content
+cargo test --workspace    → 34 passed, 0 failed (4 CLI + 30 core)
+smartcommit plan --messages-file commits.txt → parses and prints commit messages
 ```
