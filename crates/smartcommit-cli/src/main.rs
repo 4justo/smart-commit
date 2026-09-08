@@ -4,12 +4,17 @@
 //! `analyze` now shows a diff summary (+additions -deletions, hunk
 //! count, or "Binary file changed") per staged file. `--verbose`
 //! additionally prints full hunk content.
+//!
+//! # Module 5 status
+//! `plan` reads a messages file and parses it into commit messages.
 
 use clap::{Parser, Subcommand};
 use smartcommit_core::{
-    get_staged_changes, get_staged_diffs, inspect_repository_state, ChangeKind, DiffLine,
-    FileDiff, InspectorError, RepositoryError, RepositorySafety, StagedChangesError,
+    get_staged_changes, get_staged_diffs, inspect_repository_state, ChangeKind, CommitMessages,
+    DiffLine, FileDiff, InspectorError, ParseCommitMessagesError, RepositoryError,
+    RepositorySafety, StagedChangesError,
 };
+use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -43,6 +48,12 @@ enum Commands {
         #[arg(long)]
         verbose: bool,
     },
+    /// Parse a messages file into individual commit messages.
+    Plan {
+        /// Path to a text file containing commit messages.
+        #[arg(long, value_name = "FILE")]
+        messages_file: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -51,6 +62,7 @@ fn main() -> ExitCode {
     match cli.command {
         Commands::Doctor => run_doctor(cli.repo),
         Commands::Analyze { verbose } => run_analyze(cli.repo, verbose),
+        Commands::Plan { messages_file } => run_plan(messages_file),
     }
 }
 
@@ -172,6 +184,39 @@ fn run_analyze(repo_path: Option<PathBuf>, verbose: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+fn run_plan(messages_file: PathBuf) -> ExitCode {
+    // Module 5 stays file-driven and deterministic: read text, parse text,
+    // print the parsed messages, and stop there.
+    let text = match fs::read_to_string(&messages_file) {
+        Ok(text) => text,
+        Err(err) => {
+            eprintln!(
+                "Could not read messages file {}: {err}",
+                messages_file.display()
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let messages = match text.parse::<CommitMessages>() {
+        Ok(messages) => messages,
+        Err(ParseCommitMessagesError::EmptyInput) => {
+            eprintln!(
+                "Could not parse commit messages from {}: message input is empty",
+                messages_file.display()
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+
+    println!("Parsed {} commit message(s):", messages.0.len());
+    for (i, message) in messages.0.iter().enumerate() {
+        println!("{}: {}", i + 1, message.text);
+    }
+
+    ExitCode::SUCCESS
+}
+
 fn print_diff_summary(diff: &FileDiff, verbose: bool) {
     if diff.is_binary {
         println!("  Binary file changed");
@@ -245,6 +290,5 @@ fn safety_label(safety: RepositorySafety) -> &'static str {
         RepositorySafety::Blocked => "blocked",
     }
 }
-
 
 
