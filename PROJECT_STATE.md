@@ -154,19 +154,130 @@ it at the end of every module.
 
 ## Current module
 
-Nothing in progress. Module 5 is complete and verified.
+Nothing in progress. Module 6 is complete and verified.
+
+## Corrections made while starting Module 6
+
+Per the standing instruction to check the repo for issues before
+each module, the following were found and fixed — none were part of
+Module 6 itself, but all were real, demonstrated problems rather
+than style preferences:
+
+- **`ARCHITECTURE.md` / `Architecture.md` filename collision.**
+  The repo had two architecture documents differing only by case:
+  `Architecture.md` (a pre-existing, detailed 68-section spec — the
+  actual authoritative source, predating even Module 0) and
+  `ARCHITECTURE.md` (a much shorter file written during the Module 0
+  workspace restructuring, which unintentionally shadowed rather
+  than replaced the original on a case-sensitive filesystem). On a
+  case-insensitive filesystem (macOS, Windows — both explicitly
+  in-scope per `AI_DEVELOPMENT_CONTEXT.md` §76) these two files
+  collide, which risks silent data loss or a broken checkout.
+  Consolidated into a single `ARCHITECTURE.md`: the original
+  68-section spec is preserved in full, with a new "Implementation
+  Status Addendum" appended mapping each architectural module (§9
+  Repository, §10 Repository State, §11 Change Discovery, §12 Diff,
+  §13 Message) to its actual source file, plus notes on dependency
+  policy and Git-integration approach as actually implemented.
+  `Architecture.md` (the differently-cased duplicate) was removed.
+- **Duplicate `modules.md`.** An identical (bar one trailing
+  newline) copy sat at the repo root alongside the canonical
+  `docs/modules.md`. Removed the root-level duplicate.
+- **Testing manuals scattered at repo root.** `module0.md`,
+  `module3-manual.md`, `module4-manual.md`, `module5-manual.md` were
+  loose files in the repo root, inconsistent with the project's own
+  `docs/` convention. Moved into `docs/testing/` and renamed for
+  consistency: `module-0.md`, `module-3.md`, `module-4.md`,
+  `module-5.md`.
+- **Module 5's types lived directly in `lib.rs`** instead of their
+  own file, unlike every other module (`repository.rs`,
+  `repository_state.rs`, `staged_changes.rs`, `diff.rs`). Extracted
+  `CommitMessage`, `CommitMessages`, and `ParseCommitMessagesError`
+  into `crates/smartcommit-core/src/message_parser.rs` for
+  consistency. While there, simplified the parser to branch once on
+  whether the input has blank lines rather than always computing the
+  blank-line-grouped result and sometimes discarding it — same
+  behavior (all original tests still pass unchanged), less wasted
+  work. Also added two tests: a genuinely multi-line message within
+  one blank-line-separated block (the parser already supported this;
+  it just wasn't tested), and extra/repeated blank lines between
+  messages.
+
+## Module 6 — Basic Deterministic File Matcher ✅
+
+- `smartcommit-core::match_files_to_messages(messages, files, diffs)`
+  — scores every (message, file) pair using plain token evidence,
+  no AI, no embeddings. Returns `messages.len() * files.len()`
+  `MatchScore { message_id, file_id, score, reasons }` entries, in
+  message-major order.
+- Evidence categories and weights: filename token match (0.5),
+  directory token match (0.3), diff-added-line token match (0.15),
+  literal file-extension mention (0.1) — summed and capped at 1.0.
+  Each message token can contribute filename-OR-directory (filename
+  wins if both), plus independently diff and extension.
+- **Key implementation decision, found via testing, not assumed
+  upfront:** modules.md's own worked example ("Fix authentication"
+  matching `src/auth/login.rs` with evidence `auth`, `login`,
+  `authentication`) requires "authentication" to credit a directory
+  literally named "auth" — an exact-token-equality matcher can never
+  do this. Added `tokens_related(a, b)`: true if equal, or if one is
+  a prefix of the other and both are ≥3 characters. This is the
+  module's entire implementation of modules.md's suggested
+  "stemmed/simple normalized match" category, deliberately without a
+  real stemming library. First implementation used strict equality
+  and 3 of the 6 tests failed against realistic fixtures — this
+  fix was driven by those failures, not written speculatively.
+- Tokenizer splits on any non-alphanumeric character (handles
+  `snake_case`, `kebab-case`, path separators, punctuation in one
+  pass) plus camelCase boundaries, lowercases everything, filters a
+  short English stopword list, and applies minimal plural stemming
+  (strip one trailing `s` from words >3 chars, skipping words ending
+  `ss`). Domain verbs like "fix"/"update"/"improve" are deliberately
+  *not* treated as stopwords — spec gives no basis for assuming
+  which verbs are noise vs. signal.
+- Diff evidence only looks at *added* lines (`DiffLine::Added`) — a
+  removed line describes what used to be true, not what the staged
+  change is about.
+- Uses `BTreeSet<String>` (not `HashSet`) for every token collection
+  specifically for determinism: `HashSet`'s default hasher is
+  randomized per process, which would make `reasons` ordering
+  non-reproducible across runs — directly undermining the module's
+  own completion criteria ("repeatable scores and explanations").
+  A dedicated test (`results_are_deterministic_across_repeated_runs`)
+  asserts two calls with identical input produce byte-identical
+  output, reasons included.
+- No CLI command added — modules.md's Module 6 section has no "##
+  CLI" heading (unlike every other module so far), so matching
+  results will surface through Module 7's `plan` command instead,
+  not a new subcommand here.
+- Tests: 7 unit tests — obvious auth match (now genuinely
+  cross-referencing filename/directory/diff, not just asserting a
+  number), obvious docs match, ambiguous shared utility (two
+  messages scoring comparably on one shared file), no relevant
+  message (score 0.0, empty reasons), multiple relevant messages
+  scoring independently, the determinism regression test, and a
+  tokenizer unit test for camelCase/snake_case/kebab-case.
+- Manually sanity-checked against modules.md's own worked example
+  (`src/auth/login.rs` and `src/auth/jwt.rs` both score via the
+  shared `auth` directory token against "Fix authentication";
+  `README.md` scores 0.0) using a throwaway `cargo run --example`,
+  since Module 6 has no CLI surface to exercise directly — the
+  example was deleted after confirming the output.
 
 ## Next module
 
-Module 6 — Basic Deterministic File Matcher. Will score staged files
-against parsed commit messages using deterministic evidence such as
-filenames, directories, extensions, diff keywords, and normalized
-tokens. No AI.
+Module 7 — Commit Planner. Turns parsed messages, staged files,
+diffs, and match scores into a proposed `CommitPlan` (groups +
+unassigned files), with per-group confidence and an ambiguity
+threshold applied on top of Module 6's raw scores. CLI:
+`smartcommit plan --messages-file commits.txt` gets its first real
+plan output (currently `plan` only parses and prints messages).
 
 ## Last successful verification
 
 ```text
 cargo build --workspace   → success
-cargo test --workspace    → 34 passed, 0 failed (4 CLI + 30 core)
+cargo test --workspace    → 44 passed, 0 failed (4 CLI + 40 core)
 smartcommit plan --messages-file commits.txt → parses and prints commit messages
+(matcher has no CLI surface yet — verified via unit tests and a throwaway `cargo run --example`)
 ```
