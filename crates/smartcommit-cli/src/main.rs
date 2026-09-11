@@ -5,14 +5,18 @@
 //! count, or "Binary file changed") per staged file. `--verbose`
 //! additionally prints full hunk content.
 //!
-//! # Module 5 status
-//! `plan` reads a messages file and parses it into commit messages.
+//! # Module 7 status
+//! `plan` now builds and prints a real `CommitPlan`: it reads the
+//! messages file, reads staged files and diffs, scores every
+//! message/file pair (Module 6), and groups files under the message
+//! the planner is confident they belong to (Module 7). No Git
+//! modification occurs — this command only reads.
 
 use clap::{Parser, Subcommand};
 use smartcommit_core::{
-    get_staged_changes, get_staged_diffs, inspect_repository_state, ChangeKind, CommitMessages,
-    DiffLine, FileDiff, InspectorError, ParseCommitMessagesError, RepositoryError,
-    RepositorySafety, StagedChangesError,
+    build_commit_plan, get_staged_changes, get_staged_diffs, inspect_repository_state,
+    match_files_to_messages, ChangeKind, CommitMessages, DiffLine, FileDiff, InspectorError,
+    ParseCommitMessagesError, RepositoryError, RepositorySafety, StagedChangesError,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -48,7 +52,8 @@ enum Commands {
         #[arg(long)]
         verbose: bool,
     },
-    /// Parse a messages file into individual commit messages.
+    /// Propose a commit plan from a messages file and the currently
+    /// staged changes. Read-only — makes no Git modification.
     Plan {
         /// Path to a text file containing commit messages.
         #[arg(long, value_name = "FILE")]
@@ -62,7 +67,7 @@ fn main() -> ExitCode {
     match cli.command {
         Commands::Doctor => run_doctor(cli.repo),
         Commands::Analyze { verbose } => run_analyze(cli.repo, verbose),
-        Commands::Plan { messages_file } => run_plan(messages_file),
+        Commands::Plan { messages_file } => run_plan(cli.repo, messages_file),
     }
 }
 
@@ -184,9 +189,7 @@ fn run_analyze(repo_path: Option<PathBuf>, verbose: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn run_plan(messages_file: PathBuf) -> ExitCode {
-    // Module 5 stays file-driven and deterministic: read text, parse text,
-    // print the parsed messages, and stop there.
+fn run_plan(repo_path: Option<PathBuf>, messages_file: PathBuf) -> ExitCode {
     let text = match fs::read_to_string(&messages_file) {
         Ok(text) => text,
         Err(err) => {
@@ -209,9 +212,63 @@ fn run_plan(messages_file: PathBuf) -> ExitCode {
         }
     };
 
-    println!("Parsed {} commit message(s):", messages.0.len());
-    for (i, message) in messages.0.iter().enumerate() {
-        println!("{}: {}", i + 1, message.text);
+    let target = match resolve_target(repo_path) {
+        Ok(t) => t,
+        Err(code) => return code,
+    };
+
+    let files = match get_staged_changes(&target) {
+        Ok(files) if files.is_empty() => {
+            println!("No staged changes found.");
+            return ExitCode::FAILURE;
+        }
+        Ok(files) => files,
+        Err(e) => return report_staged_changes_error(e),
+    };
+
+    // Same fallback approach as `analyze`: a diff-extraction failure
+    // shouldn't block planning — diff content only affects the
+    // matcher's diff-keyword evidence, not filename/directory
+    // evidence, so a plan without it is still useful.
+    let diffs = match get_staged_diffs(&target) {
+        Ok(diffs) => diffs,
+        Err(e) => {
+            eprintln!("Warning: could not extract diff content ({e}); matching on filenames and directories only.");
+            Vec::new()
+        }
+    };
+
+    let scores = match_files_to_messages(&messages.0, &files, &diffs);
+    let plan = build_commit_plan(&messages.0, &files, &scores);
+
+    println!("Commit Plan");
+    println!();
+    for (i, group) in plan.groups.iter().enumerate() {
+        println!("[{}] {}", i + 1, group.message);
+        if group.files.is_empty() {
+            println!("    (no matching files)");
+        } else {
+            for file in &group.files {
+                println!("    {}", file.path.display());
+            }
+        }
+        println!("    Confidence: {:.0}%", group.confidence * 100.0);
+        println!();
+    }
+
+    if !plan.unassigned.is_empty() {
+        println!("Unassigned:");
+        for file in &plan.unassigned {
+            println!("    {}", file.path.display());
+        }
+        println!();
+    }
+
+    if !plan.warnings.is_empty() {
+        println!("Warnings:");
+        for warning in &plan.warnings {
+            println!("    {warning}");
+        }
     }
 
     ExitCode::SUCCESS
