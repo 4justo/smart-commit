@@ -154,19 +154,203 @@ it at the end of every module.
 
 ## Current module
 
-Nothing in progress. Module 5 is complete and verified.
+Nothing in progress. Module 7 is complete and verified.
+
+## Corrections made while starting Module 6
+
+Per the standing instruction to check the repo for issues before
+each module, the following were found and fixed — none were part of
+Module 6 itself, but all were real, demonstrated problems rather
+than style preferences:
+
+- **`ARCHITECTURE.md` / `Architecture.md` filename collision.**
+  The repo had two architecture documents differing only by case:
+  `Architecture.md` (a pre-existing, detailed 68-section spec — the
+  actual authoritative source, predating even Module 0) and
+  `ARCHITECTURE.md` (a much shorter file written during the Module 0
+  workspace restructuring, which unintentionally shadowed rather
+  than replaced the original on a case-sensitive filesystem). On a
+  case-insensitive filesystem (macOS, Windows — both explicitly
+  in-scope per `AI_DEVELOPMENT_CONTEXT.md` §76) these two files
+  collide, which risks silent data loss or a broken checkout.
+  Consolidated into a single `ARCHITECTURE.md`: the original
+  68-section spec is preserved in full, with a new "Implementation
+  Status Addendum" appended mapping each architectural module (§9
+  Repository, §10 Repository State, §11 Change Discovery, §12 Diff,
+  §13 Message) to its actual source file, plus notes on dependency
+  policy and Git-integration approach as actually implemented.
+  `Architecture.md` (the differently-cased duplicate) was removed.
+- **Duplicate `modules.md`.** An identical (bar one trailing
+  newline) copy sat at the repo root alongside the canonical
+  `docs/modules.md`. Removed the root-level duplicate.
+- **Testing manuals scattered at repo root.** `module0.md`,
+  `module3-manual.md`, `module4-manual.md`, `module5-manual.md` were
+  loose files in the repo root, inconsistent with the project's own
+  `docs/` convention. Moved into `docs/testing/` and renamed for
+  consistency: `module-0.md`, `module-3.md`, `module-4.md`,
+  `module-5.md`.
+- **Module 5's types lived directly in `lib.rs`** instead of their
+  own file, unlike every other module (`repository.rs`,
+  `repository_state.rs`, `staged_changes.rs`, `diff.rs`). Extracted
+  `CommitMessage`, `CommitMessages`, and `ParseCommitMessagesError`
+  into `crates/smartcommit-core/src/message_parser.rs` for
+  consistency. While there, simplified the parser to branch once on
+  whether the input has blank lines rather than always computing the
+  blank-line-grouped result and sometimes discarding it — same
+  behavior (all original tests still pass unchanged), less wasted
+  work. Also added two tests: a genuinely multi-line message within
+  one blank-line-separated block (the parser already supported this;
+  it just wasn't tested), and extra/repeated blank lines between
+  messages.
+
+## Module 6 — Basic Deterministic File Matcher ✅
+
+- `smartcommit-core::match_files_to_messages(messages, files, diffs)`
+  — scores every (message, file) pair using plain token evidence,
+  no AI, no embeddings. Returns `messages.len() * files.len()`
+  `MatchScore { message_id, file_id, score, reasons }` entries, in
+  message-major order.
+- Evidence categories and weights: filename token match (0.5),
+  directory token match (0.3), diff-added-line token match (0.15),
+  literal file-extension mention (0.1) — summed and capped at 1.0.
+  Each message token can contribute filename-OR-directory (filename
+  wins if both), plus independently diff and extension.
+- **Key implementation decision, found via testing, not assumed
+  upfront:** modules.md's own worked example ("Fix authentication"
+  matching `src/auth/login.rs` with evidence `auth`, `login`,
+  `authentication`) requires "authentication" to credit a directory
+  literally named "auth" — an exact-token-equality matcher can never
+  do this. Added `tokens_related(a, b)`: true if equal, or if one is
+  a prefix of the other and both are ≥3 characters. This is the
+  module's entire implementation of modules.md's suggested
+  "stemmed/simple normalized match" category, deliberately without a
+  real stemming library. First implementation used strict equality
+  and 3 of the 6 tests failed against realistic fixtures — this
+  fix was driven by those failures, not written speculatively.
+- Tokenizer splits on any non-alphanumeric character (handles
+  `snake_case`, `kebab-case`, path separators, punctuation in one
+  pass) plus camelCase boundaries, lowercases everything, filters a
+  short English stopword list, and applies minimal plural stemming
+  (strip one trailing `s` from words >3 chars, skipping words ending
+  `ss`). Domain verbs like "fix"/"update"/"improve" are deliberately
+  *not* treated as stopwords — spec gives no basis for assuming
+  which verbs are noise vs. signal.
+- Diff evidence only looks at *added* lines (`DiffLine::Added`) — a
+  removed line describes what used to be true, not what the staged
+  change is about.
+- Uses `BTreeSet<String>` (not `HashSet`) for every token collection
+  specifically for determinism: `HashSet`'s default hasher is
+  randomized per process, which would make `reasons` ordering
+  non-reproducible across runs — directly undermining the module's
+  own completion criteria ("repeatable scores and explanations").
+  A dedicated test (`results_are_deterministic_across_repeated_runs`)
+  asserts two calls with identical input produce byte-identical
+  output, reasons included.
+- No CLI command added — modules.md's Module 6 section has no "##
+  CLI" heading (unlike every other module so far), so matching
+  results will surface through Module 7's `plan` command instead,
+  not a new subcommand here.
+- Tests: 7 unit tests — obvious auth match (now genuinely
+  cross-referencing filename/directory/diff, not just asserting a
+  number), obvious docs match, ambiguous shared utility (two
+  messages scoring comparably on one shared file), no relevant
+  message (score 0.0, empty reasons), multiple relevant messages
+  scoring independently, the determinism regression test, and a
+  tokenizer unit test for camelCase/snake_case/kebab-case.
+- Manually sanity-checked against modules.md's own worked example
+  (`src/auth/login.rs` and `src/auth/jwt.rs` both score via the
+  shared `auth` directory token against "Fix authentication";
+  `README.md` scores 0.0) using a throwaway `cargo run --example`,
+  since Module 6 has no CLI surface to exercise directly — the
+  example was deleted after confirming the output.
+
+## Module 7 — Commit Planner ✅
+
+- `smartcommit-core::build_commit_plan(messages, files, match_scores)`
+  — pure in-memory grouping, no Git access at all (it doesn't even
+  take a repo path). `CommitPlan { groups: Vec<CommitGroup>,
+  unassigned: Vec<ChangedFile>, warnings: Vec<String> }`;
+  `CommitGroup { message: String, files: Vec<ChangedFile>, confidence: f32 }`
+  — matches modules.md's suggested struct, with `warnings` added
+  since the module's own Validation section requires detecting and
+  reporting four specific conditions that don't fit naturally into
+  `groups`/`unassigned` alone
+- Assignment rule: a file goes to its highest-scoring message only
+  if that score clears `MIN_ASSIGNMENT_SCORE` (0.3) *and* isn't
+  within `AMBIGUITY_MARGIN` (0.1) of the second-best candidate.
+  Otherwise (too weak, or an unclear tie) the file goes to
+  `unassigned` — never split across two groups, per rule 2
+- Groups are always in the same order as the input `messages` slice
+  (rule 5), and a message with zero assigned files still gets a
+  `CommitGroup` entry with an empty `files` list and 0.0 confidence
+  rather than being dropped (rule 6) — with a matching warning
+- Group confidence = mean of its assigned files' match scores,
+  capped at 1.0
+- `warnings` covers all four items in modules.md's Validation list:
+  a message with no matching files, a file with no matching message,
+  a file matched almost equally to multiple messages, and (as a
+  positive confirmation) "All files were assigned." when nothing
+  ended up unassigned
+- Determinism: candidate scores are sorted with `message_id` as an
+  explicit tiebreaker before picking the best/second-best, so a
+  literal tie in score always resolves the same way — same
+  motivation as Module 6's `BTreeSet` choice, tested directly
+  (`produces_deterministic_output_across_repeated_runs`)
+- CLI: `smartcommit plan --messages-file commits.txt` now builds and
+  prints the actual plan (previously — Module 5 — it only parsed and
+  echoed the messages). Output shape matches modules.md's own
+  worked example exactly: `[n] message` / indented file list (or
+  `(no matching files)` for an empty group) / `Confidence: NN%`,
+  then an `Unassigned:` section (omitted if empty), then a
+  `Warnings:` section (omitted if empty). Message parsing and
+  reading still happen before repository/staged-changes resolution,
+  so a messages-file error is reported without needing a valid repo
+  at all
+  - `--repo` and staged-changes/diff error handling reuse the same
+    patterns already established for `analyze` (including the same
+    "diff extraction failed, continue with reduced evidence rather
+    than losing the whole command" fallback — here it just means the
+    matcher scores on filename/directory only, not diff keywords too)
+- Tests: 7 unit tests in `planner.rs` — successful one-to-one
+  grouping, one message to several files, an empty group with its
+  warning, an unassigned file with no matching message, an ambiguous
+  file left unassigned with its warning, full-plan determinism
+  across repeated runs, and a regression test for a subtle edge case
+  (a second-place score of exactly 0.0 must never trigger the
+  ambiguity path, even though the *margin* check alone would treat
+  "0.9 vs 0.0" as unambiguously fine — the `second.score > 0.0` guard
+  is what makes that so, and it's exercised directly)
+- CLI integration tests rewritten: the old Module 5 tests asserted
+  message-echo output and didn't touch Git at all; `plan` now
+  requires a real repo with staged changes, so the tests build one
+  in a temp directory (mirroring the pattern already used throughout
+  `smartcommit-core`'s own tests) with files specifically chosen so
+  the matcher assigns two of them confidently and leaves the third
+  unrelated — directly mirroring modules.md's own CLI example (two
+  assigned groups, one unassigned file). A third new test covers the
+  "no staged changes at all" case.
+- Manually verified: full plan output byte-for-byte matches the
+  shape of modules.md's own worked example; a scenario with a
+  genuinely empty group (message with nothing staged for it) shows
+  `(no matching files)` and its warning rather than being silently
+  dropped; confirmed via `git status`/`git log` before and after
+  running `plan` that the repository is byte-for-byte unchanged — no
+  Git modification occurred, per the module's own requirement
 
 ## Next module
 
-Module 6 — Basic Deterministic File Matcher. Will score staged files
-against parsed commit messages using deterministic evidence such as
-filenames, directories, extensions, diff keywords, and normalized
-tokens. No AI.
+Module 8 — Timeline Engine. Generates commit timestamps (fixed
+interval, random range with a seedable/injectable RNG for testable
+determinism, or custom start time), producing `PlannedCommitTime`
+entries for the plan's groups without creating any commits or
+touching Git. Chronological ordering must be preserved; future
+timestamps must not be generated unless explicitly allowed.
 
 ## Last successful verification
 
 ```text
 cargo build --workspace   → success
-cargo test --workspace    → 34 passed, 0 failed (4 CLI + 30 core)
-smartcommit plan --messages-file commits.txt → parses and prints commit messages
+cargo test --workspace    → 51 passed, 0 failed (5 CLI + 46 core)
+smartcommit plan --messages-file commits.txt → full Commit Plan output: groups, confidence, unassigned, warnings
+git status/git log before and after `plan` → byte-for-byte identical (no Git modification)
 ```
