@@ -11,6 +11,7 @@ mod planner;
 mod repository;
 mod repository_state;
 mod staged_changes;
+mod timeline;
 
 pub use diff::{get_staged_diffs, DiffError, DiffHunk, DiffLine, FileDiff};
 pub use matcher::{match_files_to_messages, MatchScore};
@@ -21,3 +22,13 @@ pub use repository_state::{
     inspect_repository_state, InspectorError, RepositorySafety, RepositoryState,
 };
 pub use staged_changes::{get_staged_changes, ChangeKind, ChangedFile, StagedChangesError};
+pub use timeline::{
+    apply_timeline_to_plan, generate_timeline, ApplyTimelineError, PlannedCommitTime,
+    RandomSource, SeededRandomSource, SystemRandomSource, TimedCommitGroup, TimedCommitPlan,
+    TimelineError, TimelineMode,
+};
+
+// Re-exported so downstream crates (smartcommit-cli and later
+// modules) can construct/match on PlannedCommitTime's timestamp
+// field without adding chrono as their own separate dependency.
+pub use chrono::{DateTime, Duration, FixedOffset};

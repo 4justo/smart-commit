@@ -154,7 +154,7 @@ it at the end of every module.
 
 ## Current module
 
-Nothing in progress. Module 7 is complete and verified.
+Nothing in progress. Module 8 is complete and verified.
 
 ## Corrections made while starting Module 6
 
@@ -339,18 +339,101 @@ than style preferences:
 
 ## Next module
 
-Module 8 — Timeline Engine. Generates commit timestamps (fixed
-interval, random range with a seedable/injectable RNG for testable
-determinism, or custom start time), producing `PlannedCommitTime`
-entries for the plan's groups without creating any commits or
-touching Git. Chronological ordering must be preserved; future
-timestamps must not be generated unless explicitly allowed.
+Module 9 — Safety Checkpoint Engine. Creates a recovery point
+(a backup ref/branch under something like `refs/smartcommit/backups/<timestamp>`)
+capturing the original HEAD, branch, and repository state before any
+commit-creating operation. Must abort cleanly (no repository
+modification) if checkpoint creation itself fails.
+
+## Module 8 — Timeline Engine ✅
+
+- `smartcommit-core::generate_timeline(commit_count, mode, start, now, allow_future, rng)`
+  — produces one `PlannedCommitTime { commit_index, timestamp }` per
+  commit. Pure computation: takes `now` as a parameter rather than
+  reading the system clock internally, specifically so
+  future-timestamp validation is testable without waiting on a real
+  clock or mocking time globally
+- `TimelineMode::Fixed { interval }` and `TimelineMode::Random { min, max }`
+  (both using `chrono::Duration`) — this is the module's first real
+  need for a date/time crate, so `chrono = "0.4"` was added to
+  `smartcommit-core` (re-exported — `DateTime`, `Duration`,
+  `FixedOffset` — from the crate root so downstream code doesn't need
+  to add chrono itself just to touch `PlannedCommitTime`'s fields)
+- **Key design decision, not directly stated in modules.md but
+  required to satisfy its "never accidentally generate a future
+  timestamp" rule unconditionally:** the two anchor modes behave
+  differently on purpose.
+  - No `--start` (the default, most common case): the *last* commit
+    is anchored at `now`, earlier commits are placed backward. This
+    makes a future timestamp structurally impossible — there's
+    nothing to validate, since repeatedly subtracting a non-negative
+    gap from `now` can never overshoot it. Verified directly by a
+    test with a large random range and 50 commits, asserting every
+    timestamp is `<= now`.
+  - Custom `--start`: the *first* commit is anchored there, later
+    commits move forward. This is the only branch that can actually
+    reach a future timestamp, so it's the only branch the
+    `allow_future` check guards.
+- No `rand` crate dependency — implemented a small, fully
+  deterministic splitmix64 PRNG (`SeededRandomSource`) directly,
+  since the requirement is "spread out staggered timestamps," not
+  cryptographic unpredictability, and modules.md's dependency policy
+  is to add a crate only when actually needed. `RandomSource` is a
+  trait, so this is modules.md's "seeded RNG or deterministic test
+  interface" requirement — `SystemRandomSource` (seeded from wall-clock
+  nanos) is the production default; tests always use
+  `SeededRandomSource` with a fixed seed for reproducibility
+- Validation: zero commits, a non-positive `Fixed` interval, or an
+  inverted/negative `Random` range are all rejected before any
+  timestamp is computed (`TimelineError::{ZeroCommits, InvalidInterval, InvalidRange}`)
+- No CLI command added — like Module 6, modules.md's Module 8 section
+  has no "## CLI" heading. Timestamps will actually surface in the
+  `plan` preview once Module 11 (Preview and Confirmation CLI) adds
+  the timeline flags (`--start`, interval/range options) to the
+  command line; wiring it into `plan` now would mean guessing at
+  flag names and UX that Module 11 is explicitly responsible for
+  deciding
+- Tests: 11 unit tests — exact fixed intervals, random gaps staying
+  within `[min, max]` (checked across 20 commits), strict
+  chronological ordering (backward-from-now branch), a single commit
+  with and without a custom start, custom start respected exactly,
+  an inverted random range rejected, a non-positive fixed interval
+  rejected, zero commits rejected, a custom start that would run
+  past `now` rejected by default, the same scenario succeeding with
+  `allow_future: true`, and the 50-commit/huge-range regression test
+  for the backward-from-now guarantee
+- One genuine bug caught during testing (not just a test-writing
+  slip): my first version of the "custom start runs past now" test
+  asserted the *last* commit (`commit_index: 2`) would be the
+  reported offender. Running it showed the engine correctly reports
+  `commit_index: 1` instead — the future-timestamp check returns on
+  the *first* offending commit it finds, and with 10-minute gaps
+  starting 5 minutes before `now`, commit 1 (not commit 2) is already
+  past `now`. The engine's behavior was right; my test's arithmetic
+  was off by one commit. Fixed the test, not the engine, once I
+  hand-verified the timestamps.
+- **`ARCHITECTURE.md` (the authoritative spec, not just `modules.md`)
+  §21 names an intermediate artifact this module needs to produce:
+  the pipeline is explicitly `CommitPlan -> TimelineEngine ->
+  TimedCommitPlan -> Executor`.** `modules.md`'s own Module 8 section
+  never mentions this type — only the bare `PlannedCommitTime`. Added
+  `TimedCommitGroup` / `TimedCommitPlan` and
+  `apply_timeline_to_plan(plan, timestamps)`, which pairs each
+  `CommitGroup` with its timestamp by `commit_index` (sorting its own
+  copy of the timestamp slice first, so caller order doesn't matter)
+  and returns `ApplyTimelineError::CountMismatch` if the timestamp
+  count doesn't match the group count. This stays Module 8's own
+  responsibility (pairing plan + timestamps) rather than reaching
+  into Module 9/10 territory (checkpointing, execution) — it produces
+  the named artifact and stops there.
+- Tests: 13 unit tests total — the 11 above, plus
+  `applies_timeline_to_a_plan_pairing_by_commit_index` and
+  `rejects_a_timestamp_count_mismatch` for the `TimedCommitPlan` step
 
 ## Last successful verification
 
 ```text
 cargo build --workspace   → success
-cargo test --workspace    → 51 passed, 0 failed (5 CLI + 46 core)
-smartcommit plan --messages-file commits.txt → full Commit Plan output: groups, confidence, unassigned, warnings
-git status/git log before and after `plan` → byte-for-byte identical (no Git modification)
+cargo test --workspace    → 65 passed, 0 failed (5 CLI + 60 core)
+(no CLI surface for the timeline engine yet — verified via unit tests only, matching Module 6's precedent)
 ```

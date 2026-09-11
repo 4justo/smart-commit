@@ -2254,6 +2254,9 @@ architecture.
 | §11 Change Discovery | `crates/smartcommit-core/src/staged_changes.rs` |
 | §12 Diff | `crates/smartcommit-core/src/diff.rs` |
 | §13 Message | `crates/smartcommit-core/src/message_parser.rs` |
+| §14–§16 Matching | `crates/smartcommit-core/src/matcher.rs` |
+| §17–§19 Commit Planner | `crates/smartcommit-core/src/planner.rs` |
+| §20–§21 Timeline | `crates/smartcommit-core/src/timeline.rs` |
 
 Each is a plain Rust module within `smartcommit-core`, per §8 ("These
 can initially be Rust modules within one crate. They do not need to
