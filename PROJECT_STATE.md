@@ -154,7 +154,7 @@ it at the end of every module.
 
 ## Current module
 
-Nothing in progress. Module 10 is complete and verified.
+Nothing in progress. Module 11 is complete and verified.
 
 ## Corrections made while starting Module 6
 
@@ -588,22 +588,101 @@ and expected dates into `DateTime<FixedOffset>` and comparing the
 parsed instants, which are equal regardless of which valid ISO 8601
 rendering git chooses. All 83 tests pass with this fix.
 
+## Module 11 — Preview and Confirmation CLI ✅
+
+**This is the module where SmartCommit becomes an actually usable
+tool** — the full core loop (`git add .` → `smartcommit plan` →
+`smartcommit commit`) works end to end from the terminal.
+
+- `smartcommit plan --messages-file commits.txt` — full preview,
+  read-only, matching modules.md's own worked example output
+  byte-for-byte in structure (verified — see below)
+- `smartcommit commit --messages-file commits.txt` — the same
+  preview, then `[y/N]` confirmation (default No — confirmed via a
+  test that pipes a bare newline to stdin and asserts cancellation),
+  `--yes` to skip it, `--dry-run` to stop after the preview with no
+  Git modification
+- **Flow order corrected to match `ARCHITECTURE.md` §34/§35
+  precisely** (discover repository → inspect state → read staged
+  changes → parse messages → match → build plan → generate timeline
+  → render), rather than the ad-hoc ordering `plan` had from Module
+  7 (which parsed messages before touching the repository at all).
+  One consequence: `plan`/`commit` now also call `inspect_repository_state`
+  and refuse to proceed if `RepositorySafety::Blocked` (merge/
+  rebase/cherry-pick in progress, or unresolved conflicts) — this
+  wasn't explicit in modules.md's Module 11 text, but is directly
+  implied by §34's "Inspect state" step applying to `plan` too, not
+  just `commit`, and is a real safety improvement (previously
+  `plan`/`commit` would attempt to match and plan against a
+  repository in an unsafe state without ever checking)
+- `plan`, `commit --dry-run`, and `commit` all share one
+  `build_preview()` pipeline — `ARCHITECTURE.md` §36's explicit
+  requirement ("the same planning code should be used for dry-run and
+  real execution"), extended here to cover the plain preview path too
+  as the natural third instance of the same pipeline
+- Timeline is now wired into the CLI for the first time (Module 8
+  had no CLI surface until now): `--start`, `--interval-minutes`
+  (default 10), `--random-min-minutes`/`--random-max-minutes` (must
+  be given together), `--allow-future`. Manually verified: default
+  fixed timeline, custom `--start`, random mode, and the "only one of
+  random-min/random-max given" validation error
+- Exit codes made meaningful and distinct, per modules.md's own
+  requirement: `0` success, `1` validation/repository failure, `2`
+  user declined confirmation, `3` execution failed partway (some
+  commits were created — distinct from `1` specifically because the
+  repository state has genuinely changed and a blind retry would be
+  wrong)
+- Execution report rendering matches `ARCHITECTURE.md` §29's exact
+  shape (completed / failed / not executed / recovery checkpoint) —
+  manually verified with a real rejecting `pre-commit` hook,
+  confirming the printed `refs/smartcommit/backups/...` ref is real
+  and resolvable after a partial failure
+- `commit` validates there's actually something to commit (at least
+  one group has files) before proceeding to confirmation/checkpoint/
+  execution — printing "Nothing to commit" and exiting `1` rather
+  than running the whole safety-checkpoint machinery for a plan that
+  would create zero commits
+- Tests: 9 CLI integration tests (up from 5) — full plan preview
+  (updated assertions for the new `SMARTCOMMIT PLAN` format, staged
+  file count, proposed commit count, `Time:` lines), no-staged-
+  changes, blocked-repository refusal (a real merge conflict
+  provoked and confirmed via stderr), `commit --dry-run` (asserts
+  `git log`/`git status` byte-identical before and after), `commit
+  --yes` (asserts real commits with correct messages, and that the
+  unassigned file remains staged afterward), and declining
+  confirmation via a piped empty line (asserts exit code 2, no
+  commits created)
+- One existing test (`plan_rejects_empty_messages_file`) needed a
+  real fix, not just an assertion update: it previously ran with no
+  `--repo` flag at all, relying on message-parsing happening before
+  any repository check. Now that repository checks happen first (per
+  the corrected flow order above), that test needed a real temp repo
+  with staged changes to reach the message-parsing step at all —
+  fixed by giving it one, rather than reverting the flow-order fix to
+  keep the old test passing
+- README.md rewritten — it was still describing Module 0's
+  `--version`/`--help`-only state; now documents the actual working
+  workflow, timeline flags, and exit codes
+
 ## Next module
 
-Module 11 — Preview and Confirmation CLI. Wires everything built so
-far (Modules 1-10) into an actual user-facing `smartcommit plan` /
-`smartcommit commit` workflow: a full preview (repo, branch, staged
-file count, proposed commits, confidence, unassigned files, planned
-timestamps, warnings), a `[y/N]` confirmation defaulting to No,
-`--yes` for non-interactive execution, and `--dry-run` that performs
-every validation/planning step but makes no Git modification. This
-is where `execute_commit_plan` finally gets a CLI entry point.
+Module 12 — Restore and Recovery. Implements `smartcommit restore`,
+using a Module 9 safety checkpoint to show the developer exactly
+what would change (current HEAD, checkpoint HEAD, branch, commits
+that would be removed, working-tree state) and require confirmation
+before resetting to it — refusing automatic restoration when it
+would be unsafe (e.g. commits made after the SmartCommit operation
+that aren't part of it) and giving exact manual recovery instructions
+instead.
 
 ## Last successful verification
 
 ```text
 cargo build --workspace   → success
-cargo test --workspace    → 83 passed, 0 failed (5 CLI + 78 core)
-Manual end-to-end (cargo run --example, deleted after): plan -> checkpoint -> timeline -> execute
-  -> 2 correctly-scoped real commits, clean final git status, example cleaned up afterward
+cargo test --workspace    → 87 passed, 0 failed (9 CLI + 78 core)
+smartcommit plan   → matches modules.md's worked example exactly (verified manually)
+smartcommit commit --yes  → 2 real commits created, unassigned file remains staged, exit 0
+smartcommit commit --dry-run → full preview, git log/status unchanged, exit 0
+Partial failure (real rejecting pre-commit hook) → exit 3, report matches ARCHITECTURE.md §29 exactly,
+  recovery checkpoint ref confirmed real and resolvable via git for-each-ref/rev-parse
 ```
