@@ -2257,6 +2257,7 @@ architecture.
 | §14–§16 Matching | `crates/smartcommit-core/src/matcher.rs` |
 | §17–§19 Commit Planner | `crates/smartcommit-core/src/planner.rs` |
 | §20–§21 Timeline | `crates/smartcommit-core/src/timeline.rs` |
+| §22–§24 Safety Layer / Checkpoint | `crates/smartcommit-core/src/checkpoint.rs` |
 
 Each is a plain Rust module within `smartcommit-core`, per §8 ("These
 can initially be Rust modules within one crate. They do not need to

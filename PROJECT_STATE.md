@@ -154,7 +154,7 @@ it at the end of every module.
 
 ## Current module
 
-Nothing in progress. Module 8 is complete and verified.
+Nothing in progress. Module 9 is complete and verified.
 
 ## Corrections made while starting Module 6
 
@@ -337,14 +337,6 @@ than style preferences:
   running `plan` that the repository is byte-for-byte unchanged — no
   Git modification occurred, per the module's own requirement
 
-## Next module
-
-Module 9 — Safety Checkpoint Engine. Creates a recovery point
-(a backup ref/branch under something like `refs/smartcommit/backups/<timestamp>`)
-capturing the original HEAD, branch, and repository state before any
-commit-creating operation. Must abort cleanly (no repository
-modification) if checkpoint creation itself fails.
-
 ## Module 8 — Timeline Engine ✅
 
 - `smartcommit-core::generate_timeline(commit_count, mode, start, now, allow_future, rng)`
@@ -430,10 +422,81 @@ modification) if checkpoint creation itself fails.
   `applies_timeline_to_a_plan_pairing_by_commit_index` and
   `rejects_a_timestamp_count_mismatch` for the `TimedCommitPlan` step
 
+## Module 9 — Safety Checkpoint Engine ✅
+
+- `smartcommit-core::create_safety_checkpoint(path, now)` — records
+  the pre-operation state and creates a recovery point. Never touches
+  an existing branch or HEAD; the only Git write is creating a new
+  ref under `refs/smartcommit/backups/<timestamp>`
+- `SafetyCheckpoint { original_head, branch, backup_ref, created_at, repository_state, staged_files }`
+  — `created_at` is named explicitly in `ARCHITECTURE.md` §24's
+  version of this struct (`modules.md`'s own sketch omits it);
+  `repository_state` and `staged_files` are full snapshots (Modules
+  2 and 3) captured at checkpoint time, since `modules.md`'s
+  Requirements text explicitly says to capture "Repository state"
+  and "Staged changes," even though its struct sketch only shows
+  three fields — Module 12 (Restore) will want this context without
+  reconstructing it after the fact
+- **Mechanism, verified empirically before relying on it:**
+  `git update-ref --create-reflog <ref> <oid> ""` — the empty
+  old-value argument makes git refuse to overwrite an existing ref
+  (`fatal: ... reference already exists`, confirmed with a live
+  repo), which is both the collision-detection signal this module
+  needs *and* an atomicity guarantee against a race between two
+  processes, without needing to know the all-zeros OID's length
+  (which differs between SHA-1 and SHA-256 repos)
+- A ref outside `refs/heads/` never appears in `git branch` —
+  confirmed empirically and locked in by a dedicated test
+  (`backup_ref_does_not_appear_in_branch_listing`) — satisfying
+  modules.md's "do not clutter normal branch listings" requirement
+  without needing a bespoke listing-filter mechanism
+- Collision handling: if the base timestamp-derived ref name already
+  exists (two checkpoints requested with the same `now`, most likely
+  within the same second, or — as in the test — the exact same
+  injected timestamp), the name gets `-1`, `-2`, etc. appended until
+  an unused one is found (bounded at 1000 attempts, after which
+  `CheckpointError::NameExhausted`). Only "already exists" failures
+  are treated as collisions to retry past — any other `update-ref`
+  failure (bad OID, permissions, corrupt repo) surfaces immediately
+  rather than being silently absorbed into 1000 retries
+- Ordering matters for the "failure must not modify the repository"
+  rule: HEAD, branch, repository state, and staged files are all
+  read *before* the one mutating step (ref creation). If gathering
+  any of them fails — including `NoCommits`, returned when HEAD is
+  unborn on a brand-new repo with nothing to checkpoint yet — nothing
+  has been written. Verified directly by comparing `.git` directory
+  entry counts before and after a failed checkpoint attempt
+- `now` is a parameter, not read from the system clock internally —
+  same rationale as Module 8's `generate_timeline`: deterministic
+  tests, and it lets a test force a same-timestamp collision on
+  demand instead of relying on a real clock race
+- Tests: 7 unit tests — backup ref resolves to the correct HEAD,
+  branch and staged-files snapshots are captured correctly, detached
+  HEAD is detected as `branch: None`, the backup ref remains valid
+  and unchanged after further commits are made, a checkpoint attempt
+  on a repo with no commits yet fails cleanly with no repository
+  modification, a same-timestamp collision produces two distinct
+  refs (both resolving to the same commit), and the backup ref never
+  shows up in `git branch --list`
+- Manually verified outside the test suite too: created a checkpoint
+  ref by hand in a real repo, confirmed `git for-each-ref
+  refs/smartcommit` shows it, `git branch` doesn't, and it has a
+  (empty but present) reflog entry
+
+## Next module
+
+Module 10 — Commit Executor. The most safety-critical MVP module:
+creates the actual commits from an approved `TimedCommitPlan`,
+staging only each group's intended files per commit, preserving
+unstaged changes, applying planned timestamps, and stopping
+immediately (with clear recovery instructions pointing at the
+Module 9 checkpoint) if any commit in the sequence fails partway
+through.
+
 ## Last successful verification
 
 ```text
 cargo build --workspace   → success
-cargo test --workspace    → 65 passed, 0 failed (5 CLI + 60 core)
-(no CLI surface for the timeline engine yet — verified via unit tests only, matching Module 6's precedent)
+cargo test --workspace    → 72 passed, 0 failed (5 CLI + 67 core)
+(no CLI surface for checkpointing yet — it's invoked internally by Module 10, not a standalone command; verified via unit tests and a manual for-each-ref/branch check)
 ```
