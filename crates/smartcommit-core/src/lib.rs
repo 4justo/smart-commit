@@ -6,6 +6,7 @@
 
 mod checkpoint;
 mod diff;
+mod executor;
 mod matcher;
 mod message_parser;
 mod planner;
@@ -16,6 +17,7 @@ mod timeline;
 
 pub use checkpoint::{create_safety_checkpoint, CheckpointError, SafetyCheckpoint};
 pub use diff::{get_staged_diffs, DiffError, DiffHunk, DiffLine, FileDiff};
+pub use executor::{execute_commit_plan, CompletedCommit, ExecutionError, ExecutionFailure, ExecutionReport};
 pub use matcher::{match_files_to_messages, MatchScore};
 pub use message_parser::{CommitMessage, CommitMessages, ParseCommitMessagesError};
 pub use planner::{build_commit_plan, CommitGroup, CommitPlan};

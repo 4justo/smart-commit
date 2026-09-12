@@ -2258,6 +2258,7 @@ architecture.
 | §17–§19 Commit Planner | `crates/smartcommit-core/src/planner.rs` |
 | §20–§21 Timeline | `crates/smartcommit-core/src/timeline.rs` |
 | §22–§24 Safety Layer / Checkpoint | `crates/smartcommit-core/src/checkpoint.rs` |
+| §25–§29 Execution Layer | `crates/smartcommit-core/src/executor.rs` |
 
 Each is a plain Rust module within `smartcommit-core`, per §8 ("These
 can initially be Rust modules within one crate. They do not need to

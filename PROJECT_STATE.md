@@ -154,7 +154,7 @@ it at the end of every module.
 
 ## Current module
 
-Nothing in progress. Module 9 is complete and verified.
+Nothing in progress. Module 10 is complete and verified.
 
 ## Corrections made while starting Module 6
 
@@ -483,20 +483,127 @@ than style preferences:
   refs/smartcommit` shows it, `git branch` doesn't, and it has a
   (empty but present) reflog entry
 
+## Module 10 — Commit Executor ✅
+
+The most safety-critical module in the MVP. **The entire approach was
+validated empirically against a real repository before any Rust was
+written** — see the design note at the top of `executor.rs` for the
+full reasoning; summarized here.
+
+- `smartcommit-core::execute_commit_plan(repo_path, groups, timestamps, checkpoint)`
+  — creates one real commit per non-empty `CommitGroup` (Module 7),
+  in order, applying Module 8's timestamps when `timestamps` is
+  `Some` (git's real current time when `None` — the direct
+  implementation of "if timeline mode is enabled")
+- **Rejected `git commit-tree` (the "obviously safest" plumbing
+  approach) for one specific, load-bearing reason: it never runs
+  hooks.** modules.md explicitly requires treating hook rejection as
+  a real execution failure, which is impossible if hooks can't fire
+  at all. Used a **temporary index per commit** instead (`GIT_INDEX_FILE`
+  pointed at a throwaway file under `.git/smartcommit/tmp/`,
+  populated via `git read-tree` + `git update-index --cacheinfo`),
+  committed with ordinary `git commit` — hooks run, scoped to
+  exactly that commit's own content
+- Confirmed empirically, before writing any Rust, in a real repo with
+  a real `pre-commit` hook:
+  - `git commit` with `GIT_INDEX_FILE` set never touches the real
+    `.git/index` — `git ls-files --stage` byte-for-byte identical
+    before and after a full multi-commit sequence
+  - An unstaged edit stacked *on top of* a file being split into a
+    commit right now survives completely untouched, as does an
+    unrelated file's unstaged-only edit
+  - A `pre-commit` hook invoked this way sees `git diff --cached`
+    scoped to *only* that specific commit's files — not the original
+    full staged set
+  - A rejected commit (hook exits non-zero) leaves HEAD unmoved and
+    the real index unmoved; git's own exit code and stderr are all
+    that's needed to detect and report it
+- Each group's commit is created for real (branch ref actually moves)
+  before the next group starts — not built as a chain of dangling
+  objects attached at the end. This matches modules.md's own failure
+  narrative directly: "if commit #3 of 5 fails, report completed
+  commits" only makes sense if commits 1 and 2 are already real
+  history at that point
+- Precondition check: the repository's actual current HEAD must
+  still match `checkpoint.original_head` before anything happens —
+  if something changed the repo after the checkpoint was taken,
+  execution refuses to proceed at all (`ExecutionError::HeadMoved`)
+  rather than building on a stale assumption about "the original
+  state"
+- `ExecutionReport { completed, failure, not_attempted, checkpoint_backup_ref }`
+  — a mid-sequence failure is a normal, fully-described *outcome*
+  (`Ok(report)` with `report.failure: Some(...)`), not a Rust `Err`,
+  since the caller needs the completed-commits list *alongside* the
+  failure info in one place, matching the exact report shape
+  `ARCHITECTURE.md` §29 shows (completed / failed / not executed /
+  recovery checkpoint)
+- An empty group (no files) is silently skipped — Module 7 already
+  reported it as a warning during planning; the executor doesn't
+  re-report it as a failure
+- `--cacheinfo` is passed as three separate arguments (mode, object,
+  path) rather than the comma-joined single-argument form —
+  empirically confirmed this correctly handles a path containing a
+  literal comma, which the joined form would parse ambiguously
+- `TempIndexArea` (an internal `Drop`-guarded temp directory under
+  `.git/smartcommit/tmp/`) guarantees per-run cleanup even on an
+  early return from a failure, so a failed attempt never leaves temp
+  index files behind to confuse the next one
+- Author identity is never touched — only `GIT_AUTHOR_DATE`/
+  `GIT_COMMITTER_DATE` are set (and only when a timestamp is
+  supplied), confirmed to require *both* env vars since `--date`
+  alone only covers the author date (this was actually verified back
+  in Module 8's manual checks, and reused here)
+- Tests: 11 unit tests — two commits from two groups, three commits
+  in sequence (with a direct tree-content check partway through),
+  planned timestamps applied to both author and committer dates,
+  unstaged changes preserved (including one stacked on a staged
+  file), staged content correctly reflects the *staged* version (not
+  a later working-tree edit), failure midway (completed/failure/
+  not_attempted all correct, HEAD stops exactly where expected), a
+  **real hook rejection** via an actual installed `pre-commit` script
+  (HEAD doesn't move past the last success, the real index still
+  shows the rejected file staged), deleted files, added files, empty
+  groups skipped without being reported as failures, and refusing to
+  run at all when HEAD has moved since the checkpoint
+- Manually verified end-to-end beyond the unit tests: a full
+  plan → checkpoint → timeline → execute pipeline on a realistic
+  two-message scenario, using every module built so far together,
+  producing two correctly-scoped real commits and a clean final
+  `git status`
+
+### Post-delivery fix: `applies_planned_timestamps` test was git-version-fragile
+
+Reported by the developer running `cargo test --workspace` locally
+(git 2.43.0 in the sandbox where this was built vs. a newer git on
+the developer's machine): the test failed with `left: "...Z"` vs.
+`right: "...+00:00"`. Different git versions render a zero UTC
+offset differently under `--date=iso-strict` (`Z` vs. `+00:00` — both
+valid ISO 8601 for the identical instant), and the test asserted an
+exact string match against one specific rendering. **The executor
+itself was never wrong** — the timestamps were being applied
+correctly on both machines; only the test's string comparison was
+fragile to a formatting choice that isn't actually part of git's
+documented/stable output contract. Fixed by parsing both the actual
+and expected dates into `DateTime<FixedOffset>` and comparing the
+parsed instants, which are equal regardless of which valid ISO 8601
+rendering git chooses. All 83 tests pass with this fix.
+
 ## Next module
 
-Module 10 — Commit Executor. The most safety-critical MVP module:
-creates the actual commits from an approved `TimedCommitPlan`,
-staging only each group's intended files per commit, preserving
-unstaged changes, applying planned timestamps, and stopping
-immediately (with clear recovery instructions pointing at the
-Module 9 checkpoint) if any commit in the sequence fails partway
-through.
+Module 11 — Preview and Confirmation CLI. Wires everything built so
+far (Modules 1-10) into an actual user-facing `smartcommit plan` /
+`smartcommit commit` workflow: a full preview (repo, branch, staged
+file count, proposed commits, confidence, unassigned files, planned
+timestamps, warnings), a `[y/N]` confirmation defaulting to No,
+`--yes` for non-interactive execution, and `--dry-run` that performs
+every validation/planning step but makes no Git modification. This
+is where `execute_commit_plan` finally gets a CLI entry point.
 
 ## Last successful verification
 
 ```text
 cargo build --workspace   → success
-cargo test --workspace    → 72 passed, 0 failed (5 CLI + 67 core)
-(no CLI surface for checkpointing yet — it's invoked internally by Module 10, not a standalone command; verified via unit tests and a manual for-each-ref/branch check)
+cargo test --workspace    → 83 passed, 0 failed (5 CLI + 78 core)
+Manual end-to-end (cargo run --example, deleted after): plan -> checkpoint -> timeline -> execute
+  -> 2 correctly-scoped real commits, clean final git status, example cleaned up afterward
 ```
