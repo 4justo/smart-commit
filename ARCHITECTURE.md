@@ -2259,6 +2259,7 @@ architecture.
 | §20–§21 Timeline | `crates/smartcommit-core/src/timeline.rs` |
 | §22–§24 Safety Layer / Checkpoint | `crates/smartcommit-core/src/checkpoint.rs` |
 | §25–§29 Execution Layer | `crates/smartcommit-core/src/executor.rs` |
+| §33–§36 CLI Architecture / Command Flow / Dry-Run | `crates/smartcommit-cli/src/main.rs` |
 
 Each is a plain Rust module within `smartcommit-core`, per §8 ("These
 can initially be Rust modules within one crate. They do not need to
