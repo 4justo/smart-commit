@@ -18,13 +18,14 @@ smartcommit doctor      # repository detection + full state (branch, HEAD, confl
 smartcommit analyze     # staged files with diff summaries (--verbose for full hunks)
 smartcommit plan        # full preview: proposed commits, confidence, timestamps, unassigned files, warnings
 smartcommit commit      # plan, confirm ([y/N], or --yes), and create real commits (or --dry-run)
+smartcommit restore     # undo the most recent SmartCommit operation, if it's safe to do so automatically
 ```
 
 The full workflow below is real and tested, not aspirational.
 
-Still ahead: `smartcommit restore` (undo/recovery — Module 12),
-`.smartcommit.toml` configuration (Module 13), and release polish
-(Modules 14-15). See `PROJECT_STATE.md` for exact per-module status.
+Still ahead: `.smartcommit.toml` configuration (Module 13) and
+release polish (Modules 14-15). See `PROJECT_STATE.md` for exact
+per-module status.
 
 ## Workflow
 
@@ -41,6 +42,19 @@ smartcommit commit --messages-file commits.txt --yes
 # or see the full preview without committing anything:
 smartcommit commit --messages-file commits.txt --dry-run
 ```
+
+If you need to undo it afterward:
+
+```bash
+smartcommit restore
+# or, non-interactively:
+smartcommit restore --yes
+```
+
+Restore only proceeds automatically if nothing risky has happened
+since the operation (no new commits on the branch since, the branch
+hasn't changed, the safety checkpoint is still intact). Otherwise it
+refuses and prints the exact manual command instead.
 
 `commits.txt` is blank-line-separated commit messages:
 

@@ -9,9 +9,11 @@ mod diff;
 mod executor;
 mod matcher;
 mod message_parser;
+mod operation_record;
 mod planner;
 mod repository;
 mod repository_state;
+mod restore;
 mod staged_changes;
 mod timeline;
 
@@ -20,10 +22,17 @@ pub use diff::{get_staged_diffs, DiffError, DiffHunk, DiffLine, FileDiff};
 pub use executor::{execute_commit_plan, CompletedCommit, ExecutionError, ExecutionFailure, ExecutionReport};
 pub use matcher::{match_files_to_messages, MatchScore};
 pub use message_parser::{CommitMessage, CommitMessages, ParseCommitMessagesError};
+pub use operation_record::{
+    load_last_operation_record, save_operation_record, OperationRecord, OperationRecordError,
+    OperationStatus,
+};
 pub use planner::{build_commit_plan, CommitGroup, CommitPlan};
 pub use repository::{Repository, RepositoryError, RepositoryInfo};
 pub use repository_state::{
     inspect_repository_state, InspectorError, RepositorySafety, RepositoryState,
+};
+pub use restore::{
+    execute_restore, manual_recovery_instructions, plan_restore, RestoreError, RestorePlan,
 };
 pub use staged_changes::{get_staged_changes, ChangeKind, ChangedFile, StagedChangesError};
 pub use timeline::{

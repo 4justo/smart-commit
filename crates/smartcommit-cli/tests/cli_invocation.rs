@@ -372,3 +372,124 @@ fn commit_without_yes_defaults_to_no_on_empty_input() {
     fs::remove_dir_all(&repo).ok();
 }
 
+#[test]
+fn restore_reverts_a_successful_commit_and_restages_its_files() {
+    let repo = repo_with_plannable_staged_changes("restore-success");
+    let messages_file = temp_messages_file(
+        "Fix authentication in login module\n\nImprove dashboard widgets\n",
+        "restore-success",
+    );
+
+    let original_head = git_output(&repo, &["rev-parse", "HEAD"]);
+
+    let commit_output = Command::new(cargo_bin_path())
+        .arg("--repo")
+        .arg(&repo)
+        .args(["commit", "--messages-file"])
+        .arg(&messages_file)
+        .arg("--yes")
+        .output()
+        .expect("failed to run smartcommit commit");
+    assert!(commit_output.status.success());
+
+    let restore_output = Command::new(cargo_bin_path())
+        .arg("--repo")
+        .arg(&repo)
+        .args(["restore", "--yes"])
+        .output()
+        .expect("failed to run smartcommit restore");
+
+    let stdout = String::from_utf8_lossy(&restore_output.stdout);
+    assert!(restore_output.status.success(), "stdout: {stdout}");
+    assert!(stdout.contains("SMARTCOMMIT RESTORE"), "stdout: {stdout}");
+    assert!(stdout.contains("Safety: OK"), "stdout: {stdout}");
+    assert!(stdout.contains(&format!("Restored to {original_head}")), "stdout: {stdout}");
+
+    let head_after = git_output(&repo, &["rev-parse", "HEAD"]);
+    assert_eq!(head_after, original_head);
+
+    // The two files SmartCommit had committed should be staged
+    // again, exactly as before `commit` ever ran — restore never
+    // touches the real index, and it was never touched during
+    // execution either, so this falls out automatically.
+    // src/shared/config.rs was the unassigned file from the plan:
+    // it was never committed at all, so it was staged the entire
+    // time and remains so — included here for that reason, not
+    // because restore re-staged it.
+    let staged = git_output(&repo, &["diff", "--cached", "--name-only"]);
+    let mut staged_files: Vec<&str> = staged.lines().collect();
+    staged_files.sort();
+    assert_eq!(
+        staged_files,
+        vec!["src/auth/login.rs", "src/dashboard/widgets.rs", "src/shared/config.rs"]
+    );
+
+    fs::remove_dir_all(&repo).ok();
+}
+
+#[test]
+fn restore_refuses_when_a_later_commit_exists() {
+    let repo = repo_with_plannable_staged_changes("restore-unsafe");
+    let messages_file = temp_messages_file(
+        "Fix authentication in login module\n\nImprove dashboard widgets\n",
+        "restore-unsafe",
+    );
+
+    let commit_output = Command::new(cargo_bin_path())
+        .arg("--repo")
+        .arg(&repo)
+        .args(["commit", "--messages-file"])
+        .arg(&messages_file)
+        .arg("--yes")
+        .output()
+        .expect("failed to run smartcommit commit");
+    assert!(commit_output.status.success());
+
+    let head_before_restore_attempt = git_output(&repo, &["rev-parse", "HEAD"]);
+
+    write_file(&repo.join("unrelated.txt"), "unrelated work\n");
+    git(&repo, &["add", "unrelated.txt"]);
+    git(&repo, &["commit", "--quiet", "-m", "an unrelated later commit"]);
+
+    let restore_output = Command::new(cargo_bin_path())
+        .arg("--repo")
+        .arg(&repo)
+        .args(["restore", "--yes"])
+        .output()
+        .expect("failed to run smartcommit restore");
+
+    let stdout = String::from_utf8_lossy(&restore_output.stdout);
+    assert!(!restore_output.status.success(), "stdout: {stdout}");
+    assert!(stdout.contains("Safety: BLOCKED"), "stdout: {stdout}");
+    assert!(stdout.contains("git update-ref"), "stdout: {stdout}");
+
+    // HEAD must have advanced past head_before_restore_attempt (the
+    // unrelated commit) and must NOT have been reset by the refused
+    // restore.
+    let head_after = git_output(&repo, &["rev-parse", "HEAD"]);
+    assert_ne!(head_after, head_before_restore_attempt);
+
+    fs::remove_dir_all(&repo).ok();
+}
+
+#[test]
+fn restore_reports_no_operation_when_none_exists() {
+    let dir = temp_dir("restore-none");
+    git(&dir, &["init", "--quiet"]);
+    write_file(&dir.join("a.txt"), "1\n");
+    git(&dir, &["add", "a.txt"]);
+    git(&dir, &["commit", "--quiet", "-m", "init"]);
+
+    let output = Command::new(cargo_bin_path())
+        .arg("--repo")
+        .arg(&dir)
+        .args(["restore", "--yes"])
+        .output()
+        .expect("failed to run smartcommit restore");
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("No SmartCommit operation found to restore."), "stdout: {stdout}");
+
+    fs::remove_dir_all(&dir).ok();
+}

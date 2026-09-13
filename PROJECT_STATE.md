@@ -154,7 +154,7 @@ it at the end of every module.
 
 ## Current module
 
-Nothing in progress. Module 11 is complete and verified.
+Nothing in progress. Module 12 is complete and verified.
 
 ## Corrections made while starting Module 6
 
@@ -664,25 +664,110 @@ tool** — the full core loop (`git add .` → `smartcommit plan` →
   `--version`/`--help`-only state; now documents the actual working
   workflow, timeline flags, and exit codes
 
+## Module 12 — Restore and Recovery ✅
+
+- **Key design insight, a direct payoff of Module 10's careful
+  design:** since the commit executor never touches the real
+  `.git/index` (confirmed empirically back in Module 10), the index
+  still holds exactly the pre-operation staged blobs the entire time
+  a SmartCommit operation is in effect. That means restore doesn't
+  need to touch the index or working tree *at all* — it only needs
+  to move the branch (or HEAD, if detached) back to `original_head`.
+  Once that ref moves, `git status` automatically and correctly shows
+  every originally-staged file as staged again relative to the
+  restored HEAD, with zero extra logic required. Confirmed
+  empirically before writing any Rust: `git update-ref
+  refs/heads/<branch> <oid>` on the checked-out branch moves HEAD
+  while leaving the working tree and index completely untouched.
+- **New dependency, one module earlier than my own prior
+  prediction:** `serde` (with the `derive` and, on `chrono`, `serde`
+  features) and `toml` were added in *this* module, not Module 13 as
+  an earlier `ARCHITECTURE.md` addendum note predicted — corrected
+  in that note now that it's known to be wrong, rather than left
+  standing. `ARCHITECTURE.md` §31's own TOML example
+  (`operation_record.rs`) is what actually needed it first.
+  - Sandbox note: `toml = "0.8"` pulls in `indexmap`/`hashbrown`
+    versions requiring the `edition2024` Cargo feature, which this
+    sandbox's cargo (1.75.0) doesn't support — same class of issue
+    as the earlier `clap` pin. Pinned to `toml = "0.5"` here, which
+    has no such transitive requirement and exposes the same
+    `to_string_pretty`/`from_str` API used. A more capable local
+    toolchain can likely use a newer `toml` without any code changes.
+- `smartcommit-core::operation_record`: `OperationRecord { id,
+  start_time, original_head, final_head, branch, checkpoint_ref,
+  created_commits, status }`, matching `ARCHITECTURE.md` §31's field
+  list exactly. `OperationStatus::{Completed, PartialFailure, Failed}`
+  derived from an `ExecutionReport` — `Failed` specifically means
+  nothing at all was completed (the very first commit failed),
+  distinct from `PartialFailure` where at least one real commit
+  exists. `save_operation_record` writes both `last-operation.toml`
+  (always overwritten) and `operations/<id>.toml` (kept per
+  operation, `id` reusing the same timestamp-format convention as
+  Module 9's checkpoint refs) — matching §30's storage layout exactly.
+  No source code or secrets are stored, per §30's explicit rule —
+  only commit hashes, a branch name, and timestamps.
+- `smartcommit-core::restore`: `plan_restore` (read-only — inspects
+  current state, compares against the last operation record, judges
+  safety) and `execute_restore` (the single ref-move, refuses outright
+  if the plan it's given isn't marked safe). Unsafe conditions,
+  matching modules.md's "do not destroy unrelated work" requirement:
+  current HEAD no longer matches the record's `final_head` (something
+  else committed since), current branch doesn't match the recorded
+  branch, or the checkpoint ref no longer resolves to the recorded
+  `original_head`. An unstaged/untracked/staged change in the working
+  tree is reported (`working_tree_has_changes`) but is **not** a
+  safety gate on its own — restore never touches the working tree
+  regardless, so it can't be endangered by restoring
+- `manual_recovery_instructions` prints the exact `git update-ref`
+  command a developer could run themselves if they've reviewed an
+  unsafe plan and are sure — matching modules.md's "refuse automatic
+  restore and provide exact manual recovery instructions" precisely,
+  and reusing the identical logic `execute_restore` would use so the
+  instructions are always correct, never hand-derived separately
+- CLI: `smartcommit restore [--yes]` — shows current HEAD, checkpoint
+  HEAD, branch, commits that would be removed, and working-tree
+  state (modules.md's exact "Safety" list) before any confirmation;
+  `[y/N]` prompt (default No, reusing the same pattern as `commit`);
+  refuses with `Safety: BLOCKED` plus the manual instructions when
+  unsafe, without ever prompting for confirmation in that case (there
+  is nothing safe to confirm). `commit` now calls
+  `save_operation_record` right after execution (success or partial
+  failure alike) — a record-save failure is a warning, not treated as
+  the commits themselves having failed, since they already exist for
+  real at that point
+- Tests: 13 new unit tests (7 `operation_record` + 6 `restore`) plus
+  4 new CLI integration tests. The `restore` unit tests run a real
+  plan → checkpoint → execute → record sequence (not synthetic
+  fixtures) before testing restore itself, since restore's whole
+  premise depends on exactly how execution leaves the real index —
+  a synthetic checkpoint/record pair wouldn't actually prove the
+  index-preservation claim the way running the real pipeline does
+- Manually verified beyond the test suite: a real `commit --yes` run
+  followed by `restore --yes` — confirmed HEAD returns to the exact
+  pre-operation commit and both originally-staged files reappear as
+  staged, byte-for-byte the pre-operation state; the unsafe-refusal
+  path with a real unrelated intervening commit (correct reasons
+  shown, repository completely unaffected by the refused attempt,
+  correct manual command printed); and the "no operation recorded
+  yet" case on a fresh repository
+
 ## Next module
 
-Module 12 — Restore and Recovery. Implements `smartcommit restore`,
-using a Module 9 safety checkpoint to show the developer exactly
-what would change (current HEAD, checkpoint HEAD, branch, commits
-that would be removed, working-tree state) and require confirmation
-before resetting to it — refusing automatic restoration when it
-would be unsafe (e.g. commits made after the SmartCommit operation
-that aren't part of it) and giving exact manual recovery instructions
-instead.
+Module 13 — Configuration. `.smartcommit.toml` for the currently
+hardcoded values that would benefit from being adjustable — matcher
+thresholds (`MIN_ASSIGNMENT_SCORE`, `AMBIGUITY_MARGIN` from Module
+7), default timeline interval, and confirmation behavior — with CLI
+flags still taking precedence over the config file, and the config
+file over built-in defaults.
 
 ## Last successful verification
 
 ```text
 cargo build --workspace   → success
-cargo test --workspace    → 87 passed, 0 failed (9 CLI + 78 core)
-smartcommit plan   → matches modules.md's worked example exactly (verified manually)
-smartcommit commit --yes  → 2 real commits created, unassigned file remains staged, exit 0
-smartcommit commit --dry-run → full preview, git log/status unchanged, exit 0
-Partial failure (real rejecting pre-commit hook) → exit 3, report matches ARCHITECTURE.md §29 exactly,
-  recovery checkpoint ref confirmed real and resolvable via git for-each-ref/rev-parse
+cargo test --workspace    → 103 passed, 0 failed (12 CLI + 91 core)
+smartcommit commit --yes then smartcommit restore --yes
+  -> HEAD returns to exact pre-operation commit, both files re-staged automatically, exit 0
+smartcommit restore after an unrelated intervening commit
+  -> Safety: BLOCKED, correct reasons shown, repository untouched, exit 1, manual instructions printed
+smartcommit restore with no prior operation -> "No SmartCommit operation found to restore.", exit 1
 ```

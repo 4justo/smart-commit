@@ -2241,9 +2241,18 @@ architecture.
   `RepositoryError` and friends — §38's "use Rust error types rather
   than string-only errors" applies from the first error type
   onward, not deferred to a later unifying pass).
-- `anyhow`, `serde`, and `toml` remain unused as of Module 5.
-  `serde`/`toml` are anticipated for Module 13 (Configuration, §37)
-  and will be added then, not before.
+- `smartcommit-core` added `chrono` in Module 8 (`TimelineMode`'s own
+  type signature is `chrono`'s), with the `serde` feature enabled
+  from Module 12 onward so `OperationRecord`'s `start_time` field can
+  round-trip through TOML.
+- `smartcommit-core` added `serde` + `toml` in **Module 12**
+  (operation records — `ARCHITECTURE.md` §31's TOML example), not
+  Module 13 as an earlier version of this note predicted. That
+  prediction was reasonable at the time (Module 13/Configuration is
+  the more obvious TOML consumer) but wrong — Module 12's operation
+  records need TOML first. Corrected here rather than left standing
+  now that it's known to be inaccurate.
+- `anyhow` remains unused as of Module 12.
 
 ## §9–§14 module-to-file mapping (as implemented)
 
@@ -2260,6 +2269,7 @@ architecture.
 | §22–§24 Safety Layer / Checkpoint | `crates/smartcommit-core/src/checkpoint.rs` |
 | §25–§29 Execution Layer | `crates/smartcommit-core/src/executor.rs` |
 | §33–§36 CLI Architecture / Command Flow / Dry-Run | `crates/smartcommit-cli/src/main.rs` |
+| §30–§32 Recovery Module / Operation Record / Restore Architecture | `crates/smartcommit-core/src/operation_record.rs`, `crates/smartcommit-core/src/restore.rs` |
 
 Each is a plain Rust module within `smartcommit-core`, per §8 ("These
 can initially be Rust modules within one crate. They do not need to

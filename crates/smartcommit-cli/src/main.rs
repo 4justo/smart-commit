@@ -13,11 +13,13 @@
 
 use clap::{Args, Parser, Subcommand};
 use smartcommit_core::{
-    build_commit_plan, create_safety_checkpoint, execute_commit_plan, get_staged_changes,
-    get_staged_diffs, inspect_repository_state, match_files_to_messages, ChangeKind, CommitPlan,
-    CommitMessages, DateTime, DiffLine, Duration, ExecutionReport, FileDiff, FixedOffset,
-    InspectorError, ParseCommitMessagesError, PlannedCommitTime, Repository, RepositoryError,
-    RepositorySafety, StagedChangesError, SystemRandomSource, TimelineMode, Utc,
+    build_commit_plan, create_safety_checkpoint, execute_commit_plan, execute_restore,
+    get_staged_changes, get_staged_diffs, inspect_repository_state, manual_recovery_instructions,
+    match_files_to_messages, plan_restore, save_operation_record, ChangeKind, CommitMessages,
+    CommitPlan, DateTime, DiffLine, Duration, ExecutionReport, FileDiff, FixedOffset,
+    InspectorError, OperationRecord, OperationRecordError, ParseCommitMessagesError,
+    PlannedCommitTime, Repository, RepositoryError, RepositorySafety, RestoreError, RestorePlan,
+    StagedChangesError, SystemRandomSource, TimelineMode, Utc,
 };
 use std::fs;
 use std::io::Write;
@@ -83,6 +85,14 @@ enum Commands {
         /// full preview, but make no Git modification.
         #[arg(long)]
         dry_run: bool,
+    },
+    /// Undo the most recent SmartCommit operation, using the safety
+    /// checkpoint recorded before it ran. Refuses automatically if
+    /// anything has happened since that makes restoring unsafe.
+    Restore {
+        /// Skip the confirmation prompt.
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -171,6 +181,7 @@ fn main() -> ExitCode {
             yes,
             dry_run,
         } => run_commit(cli.repo, messages_file, timeline, yes, dry_run),
+        Commands::Restore { yes } => run_restore(cli.repo, yes),
     }
 }
 
@@ -524,12 +535,117 @@ fn run_commit(
         }
     };
 
+    // Recorded regardless of full success or partial failure — this
+    // is what `smartcommit restore` reads later. If saving the
+    // record itself fails, that's surfaced as a warning, not a
+    // reason to treat the commits (which already exist for real) as
+    // failed — restore just won't have anything to act on for this
+    // run, and the checkpoint ref printed below still gives a manual
+    // recovery path either way.
+    let record = OperationRecord::from_execution(&checkpoint, &report, now_utc);
+    if let Err(e) = save_operation_record(&preview.repo_root, &record) {
+        eprintln!("Warning: could not save operation record ({e}); `smartcommit restore` will not see this operation.");
+    }
+
     render_execution_report(&report);
 
     if report.is_full_success() {
         ExitCode::SUCCESS
     } else {
         exit_code_partial_failure()
+    }
+}
+
+/// Matches modules.md's Module 12 "Safety" section: current HEAD,
+/// checkpoint HEAD, branch, commits that would be removed, and
+/// working-tree state — shown before any confirmation, safe or not.
+fn render_restore_plan(plan: &RestorePlan) {
+    println!("SMARTCOMMIT RESTORE");
+    println!();
+    println!("Current HEAD:    {}", plan.current_head);
+    println!("Checkpoint HEAD: {}", plan.record.original_head);
+    println!(
+        "Branch:          {}",
+        plan.current_branch.as_deref().unwrap_or("(detached)")
+    );
+    println!();
+    println!("Commits that would be removed:");
+    for oid in &plan.record.created_commits {
+        println!("  {}", short_oid(oid));
+    }
+    println!();
+    println!(
+        "Working tree: {}",
+        if plan.working_tree_has_changes {
+            "has uncommitted changes (staged/unstaged/untracked) — restore does not touch these either way"
+        } else {
+            "clean"
+        }
+    );
+    println!();
+    if plan.is_safe {
+        println!("Safety: OK — automatic restore is safe.");
+    } else {
+        println!("Safety: BLOCKED — automatic restore refused.");
+        for reason in &plan.unsafe_reasons {
+            println!("  - {reason}");
+        }
+    }
+}
+
+fn run_restore(repo_path: Option<PathBuf>, yes: bool) -> ExitCode {
+    let target = match resolve_target(repo_path) {
+        Ok(t) => t,
+        Err(code) => return code,
+    };
+
+    let plan = match plan_restore(&target) {
+        Ok(p) => p,
+        Err(RestoreError::OperationRecord(OperationRecordError::NotFound)) => {
+            println!("No SmartCommit operation found to restore.");
+            return ExitCode::FAILURE;
+        }
+        Err(e) => {
+            eprintln!("Could not prepare a restore plan: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    render_restore_plan(&plan);
+
+    if !plan.is_safe {
+        println!();
+        println!("Manual recovery instructions, if you're sure this is what you want:");
+        println!();
+        println!("{}", manual_recovery_instructions(&plan.record));
+        return ExitCode::FAILURE;
+    }
+
+    if !yes {
+        print!("\nRestore to the pre-operation state? [y/N] ");
+        let _ = std::io::stdout().flush();
+        let mut input = String::new();
+        if std::io::stdin().read_line(&mut input).is_err() {
+            eprintln!("Could not read confirmation input.");
+            return ExitCode::FAILURE;
+        }
+        let answer = input.trim().to_lowercase();
+        if answer != "y" && answer != "yes" {
+            println!("Cancelled.");
+            return exit_code_cancelled();
+        }
+    }
+
+    match execute_restore(&target, &plan) {
+        Ok(()) => {
+            println!();
+            println!("Restored to {}.", plan.record.original_head);
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Restore failed: {e}");
+            ExitCode::FAILURE
+        }
     }
 }
 
