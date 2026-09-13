@@ -154,7 +154,7 @@ it at the end of every module.
 
 ## Current module
 
-Nothing in progress. Module 9 is complete and verified.
+Nothing in progress. Module 12 is complete and verified.
 
 ## Corrections made while starting Module 6
 
@@ -483,20 +483,291 @@ than style preferences:
   refs/smartcommit` shows it, `git branch` doesn't, and it has a
   (empty but present) reflog entry
 
+## Module 10 — Commit Executor ✅
+
+The most safety-critical module in the MVP. **The entire approach was
+validated empirically against a real repository before any Rust was
+written** — see the design note at the top of `executor.rs` for the
+full reasoning; summarized here.
+
+- `smartcommit-core::execute_commit_plan(repo_path, groups, timestamps, checkpoint)`
+  — creates one real commit per non-empty `CommitGroup` (Module 7),
+  in order, applying Module 8's timestamps when `timestamps` is
+  `Some` (git's real current time when `None` — the direct
+  implementation of "if timeline mode is enabled")
+- **Rejected `git commit-tree` (the "obviously safest" plumbing
+  approach) for one specific, load-bearing reason: it never runs
+  hooks.** modules.md explicitly requires treating hook rejection as
+  a real execution failure, which is impossible if hooks can't fire
+  at all. Used a **temporary index per commit** instead (`GIT_INDEX_FILE`
+  pointed at a throwaway file under `.git/smartcommit/tmp/`,
+  populated via `git read-tree` + `git update-index --cacheinfo`),
+  committed with ordinary `git commit` — hooks run, scoped to
+  exactly that commit's own content
+- Confirmed empirically, before writing any Rust, in a real repo with
+  a real `pre-commit` hook:
+  - `git commit` with `GIT_INDEX_FILE` set never touches the real
+    `.git/index` — `git ls-files --stage` byte-for-byte identical
+    before and after a full multi-commit sequence
+  - An unstaged edit stacked *on top of* a file being split into a
+    commit right now survives completely untouched, as does an
+    unrelated file's unstaged-only edit
+  - A `pre-commit` hook invoked this way sees `git diff --cached`
+    scoped to *only* that specific commit's files — not the original
+    full staged set
+  - A rejected commit (hook exits non-zero) leaves HEAD unmoved and
+    the real index unmoved; git's own exit code and stderr are all
+    that's needed to detect and report it
+- Each group's commit is created for real (branch ref actually moves)
+  before the next group starts — not built as a chain of dangling
+  objects attached at the end. This matches modules.md's own failure
+  narrative directly: "if commit #3 of 5 fails, report completed
+  commits" only makes sense if commits 1 and 2 are already real
+  history at that point
+- Precondition check: the repository's actual current HEAD must
+  still match `checkpoint.original_head` before anything happens —
+  if something changed the repo after the checkpoint was taken,
+  execution refuses to proceed at all (`ExecutionError::HeadMoved`)
+  rather than building on a stale assumption about "the original
+  state"
+- `ExecutionReport { completed, failure, not_attempted, checkpoint_backup_ref }`
+  — a mid-sequence failure is a normal, fully-described *outcome*
+  (`Ok(report)` with `report.failure: Some(...)`), not a Rust `Err`,
+  since the caller needs the completed-commits list *alongside* the
+  failure info in one place, matching the exact report shape
+  `ARCHITECTURE.md` §29 shows (completed / failed / not executed /
+  recovery checkpoint)
+- An empty group (no files) is silently skipped — Module 7 already
+  reported it as a warning during planning; the executor doesn't
+  re-report it as a failure
+- `--cacheinfo` is passed as three separate arguments (mode, object,
+  path) rather than the comma-joined single-argument form —
+  empirically confirmed this correctly handles a path containing a
+  literal comma, which the joined form would parse ambiguously
+- `TempIndexArea` (an internal `Drop`-guarded temp directory under
+  `.git/smartcommit/tmp/`) guarantees per-run cleanup even on an
+  early return from a failure, so a failed attempt never leaves temp
+  index files behind to confuse the next one
+- Author identity is never touched — only `GIT_AUTHOR_DATE`/
+  `GIT_COMMITTER_DATE` are set (and only when a timestamp is
+  supplied), confirmed to require *both* env vars since `--date`
+  alone only covers the author date (this was actually verified back
+  in Module 8's manual checks, and reused here)
+- Tests: 11 unit tests — two commits from two groups, three commits
+  in sequence (with a direct tree-content check partway through),
+  planned timestamps applied to both author and committer dates,
+  unstaged changes preserved (including one stacked on a staged
+  file), staged content correctly reflects the *staged* version (not
+  a later working-tree edit), failure midway (completed/failure/
+  not_attempted all correct, HEAD stops exactly where expected), a
+  **real hook rejection** via an actual installed `pre-commit` script
+  (HEAD doesn't move past the last success, the real index still
+  shows the rejected file staged), deleted files, added files, empty
+  groups skipped without being reported as failures, and refusing to
+  run at all when HEAD has moved since the checkpoint
+- Manually verified end-to-end beyond the unit tests: a full
+  plan → checkpoint → timeline → execute pipeline on a realistic
+  two-message scenario, using every module built so far together,
+  producing two correctly-scoped real commits and a clean final
+  `git status`
+
+### Post-delivery fix: `applies_planned_timestamps` test was git-version-fragile
+
+Reported by the developer running `cargo test --workspace` locally
+(git 2.43.0 in the sandbox where this was built vs. a newer git on
+the developer's machine): the test failed with `left: "...Z"` vs.
+`right: "...+00:00"`. Different git versions render a zero UTC
+offset differently under `--date=iso-strict` (`Z` vs. `+00:00` — both
+valid ISO 8601 for the identical instant), and the test asserted an
+exact string match against one specific rendering. **The executor
+itself was never wrong** — the timestamps were being applied
+correctly on both machines; only the test's string comparison was
+fragile to a formatting choice that isn't actually part of git's
+documented/stable output contract. Fixed by parsing both the actual
+and expected dates into `DateTime<FixedOffset>` and comparing the
+parsed instants, which are equal regardless of which valid ISO 8601
+rendering git chooses. All 83 tests pass with this fix.
+
+## Module 11 — Preview and Confirmation CLI ✅
+
+**This is the module where SmartCommit becomes an actually usable
+tool** — the full core loop (`git add .` → `smartcommit plan` →
+`smartcommit commit`) works end to end from the terminal.
+
+- `smartcommit plan --messages-file commits.txt` — full preview,
+  read-only, matching modules.md's own worked example output
+  byte-for-byte in structure (verified — see below)
+- `smartcommit commit --messages-file commits.txt` — the same
+  preview, then `[y/N]` confirmation (default No — confirmed via a
+  test that pipes a bare newline to stdin and asserts cancellation),
+  `--yes` to skip it, `--dry-run` to stop after the preview with no
+  Git modification
+- **Flow order corrected to match `ARCHITECTURE.md` §34/§35
+  precisely** (discover repository → inspect state → read staged
+  changes → parse messages → match → build plan → generate timeline
+  → render), rather than the ad-hoc ordering `plan` had from Module
+  7 (which parsed messages before touching the repository at all).
+  One consequence: `plan`/`commit` now also call `inspect_repository_state`
+  and refuse to proceed if `RepositorySafety::Blocked` (merge/
+  rebase/cherry-pick in progress, or unresolved conflicts) — this
+  wasn't explicit in modules.md's Module 11 text, but is directly
+  implied by §34's "Inspect state" step applying to `plan` too, not
+  just `commit`, and is a real safety improvement (previously
+  `plan`/`commit` would attempt to match and plan against a
+  repository in an unsafe state without ever checking)
+- `plan`, `commit --dry-run`, and `commit` all share one
+  `build_preview()` pipeline — `ARCHITECTURE.md` §36's explicit
+  requirement ("the same planning code should be used for dry-run and
+  real execution"), extended here to cover the plain preview path too
+  as the natural third instance of the same pipeline
+- Timeline is now wired into the CLI for the first time (Module 8
+  had no CLI surface until now): `--start`, `--interval-minutes`
+  (default 10), `--random-min-minutes`/`--random-max-minutes` (must
+  be given together), `--allow-future`. Manually verified: default
+  fixed timeline, custom `--start`, random mode, and the "only one of
+  random-min/random-max given" validation error
+- Exit codes made meaningful and distinct, per modules.md's own
+  requirement: `0` success, `1` validation/repository failure, `2`
+  user declined confirmation, `3` execution failed partway (some
+  commits were created — distinct from `1` specifically because the
+  repository state has genuinely changed and a blind retry would be
+  wrong)
+- Execution report rendering matches `ARCHITECTURE.md` §29's exact
+  shape (completed / failed / not executed / recovery checkpoint) —
+  manually verified with a real rejecting `pre-commit` hook,
+  confirming the printed `refs/smartcommit/backups/...` ref is real
+  and resolvable after a partial failure
+- `commit` validates there's actually something to commit (at least
+  one group has files) before proceeding to confirmation/checkpoint/
+  execution — printing "Nothing to commit" and exiting `1` rather
+  than running the whole safety-checkpoint machinery for a plan that
+  would create zero commits
+- Tests: 9 CLI integration tests (up from 5) — full plan preview
+  (updated assertions for the new `SMARTCOMMIT PLAN` format, staged
+  file count, proposed commit count, `Time:` lines), no-staged-
+  changes, blocked-repository refusal (a real merge conflict
+  provoked and confirmed via stderr), `commit --dry-run` (asserts
+  `git log`/`git status` byte-identical before and after), `commit
+  --yes` (asserts real commits with correct messages, and that the
+  unassigned file remains staged afterward), and declining
+  confirmation via a piped empty line (asserts exit code 2, no
+  commits created)
+- One existing test (`plan_rejects_empty_messages_file`) needed a
+  real fix, not just an assertion update: it previously ran with no
+  `--repo` flag at all, relying on message-parsing happening before
+  any repository check. Now that repository checks happen first (per
+  the corrected flow order above), that test needed a real temp repo
+  with staged changes to reach the message-parsing step at all —
+  fixed by giving it one, rather than reverting the flow-order fix to
+  keep the old test passing
+- README.md rewritten — it was still describing Module 0's
+  `--version`/`--help`-only state; now documents the actual working
+  workflow, timeline flags, and exit codes
+
+## Module 12 — Restore and Recovery ✅
+
+- **Key design insight, a direct payoff of Module 10's careful
+  design:** since the commit executor never touches the real
+  `.git/index` (confirmed empirically back in Module 10), the index
+  still holds exactly the pre-operation staged blobs the entire time
+  a SmartCommit operation is in effect. That means restore doesn't
+  need to touch the index or working tree *at all* — it only needs
+  to move the branch (or HEAD, if detached) back to `original_head`.
+  Once that ref moves, `git status` automatically and correctly shows
+  every originally-staged file as staged again relative to the
+  restored HEAD, with zero extra logic required. Confirmed
+  empirically before writing any Rust: `git update-ref
+  refs/heads/<branch> <oid>` on the checked-out branch moves HEAD
+  while leaving the working tree and index completely untouched.
+- **New dependency, one module earlier than my own prior
+  prediction:** `serde` (with the `derive` and, on `chrono`, `serde`
+  features) and `toml` were added in *this* module, not Module 13 as
+  an earlier `ARCHITECTURE.md` addendum note predicted — corrected
+  in that note now that it's known to be wrong, rather than left
+  standing. `ARCHITECTURE.md` §31's own TOML example
+  (`operation_record.rs`) is what actually needed it first.
+  - Sandbox note: `toml = "0.8"` pulls in `indexmap`/`hashbrown`
+    versions requiring the `edition2024` Cargo feature, which this
+    sandbox's cargo (1.75.0) doesn't support — same class of issue
+    as the earlier `clap` pin. Pinned to `toml = "0.5"` here, which
+    has no such transitive requirement and exposes the same
+    `to_string_pretty`/`from_str` API used. A more capable local
+    toolchain can likely use a newer `toml` without any code changes.
+- `smartcommit-core::operation_record`: `OperationRecord { id,
+  start_time, original_head, final_head, branch, checkpoint_ref,
+  created_commits, status }`, matching `ARCHITECTURE.md` §31's field
+  list exactly. `OperationStatus::{Completed, PartialFailure, Failed}`
+  derived from an `ExecutionReport` — `Failed` specifically means
+  nothing at all was completed (the very first commit failed),
+  distinct from `PartialFailure` where at least one real commit
+  exists. `save_operation_record` writes both `last-operation.toml`
+  (always overwritten) and `operations/<id>.toml` (kept per
+  operation, `id` reusing the same timestamp-format convention as
+  Module 9's checkpoint refs) — matching §30's storage layout exactly.
+  No source code or secrets are stored, per §30's explicit rule —
+  only commit hashes, a branch name, and timestamps.
+- `smartcommit-core::restore`: `plan_restore` (read-only — inspects
+  current state, compares against the last operation record, judges
+  safety) and `execute_restore` (the single ref-move, refuses outright
+  if the plan it's given isn't marked safe). Unsafe conditions,
+  matching modules.md's "do not destroy unrelated work" requirement:
+  current HEAD no longer matches the record's `final_head` (something
+  else committed since), current branch doesn't match the recorded
+  branch, or the checkpoint ref no longer resolves to the recorded
+  `original_head`. An unstaged/untracked/staged change in the working
+  tree is reported (`working_tree_has_changes`) but is **not** a
+  safety gate on its own — restore never touches the working tree
+  regardless, so it can't be endangered by restoring
+- `manual_recovery_instructions` prints the exact `git update-ref`
+  command a developer could run themselves if they've reviewed an
+  unsafe plan and are sure — matching modules.md's "refuse automatic
+  restore and provide exact manual recovery instructions" precisely,
+  and reusing the identical logic `execute_restore` would use so the
+  instructions are always correct, never hand-derived separately
+- CLI: `smartcommit restore [--yes]` — shows current HEAD, checkpoint
+  HEAD, branch, commits that would be removed, and working-tree
+  state (modules.md's exact "Safety" list) before any confirmation;
+  `[y/N]` prompt (default No, reusing the same pattern as `commit`);
+  refuses with `Safety: BLOCKED` plus the manual instructions when
+  unsafe, without ever prompting for confirmation in that case (there
+  is nothing safe to confirm). `commit` now calls
+  `save_operation_record` right after execution (success or partial
+  failure alike) — a record-save failure is a warning, not treated as
+  the commits themselves having failed, since they already exist for
+  real at that point
+- Tests: 13 new unit tests (7 `operation_record` + 6 `restore`) plus
+  4 new CLI integration tests. The `restore` unit tests run a real
+  plan → checkpoint → execute → record sequence (not synthetic
+  fixtures) before testing restore itself, since restore's whole
+  premise depends on exactly how execution leaves the real index —
+  a synthetic checkpoint/record pair wouldn't actually prove the
+  index-preservation claim the way running the real pipeline does
+- Manually verified beyond the test suite: a real `commit --yes` run
+  followed by `restore --yes` — confirmed HEAD returns to the exact
+  pre-operation commit and both originally-staged files reappear as
+  staged, byte-for-byte the pre-operation state; the unsafe-refusal
+  path with a real unrelated intervening commit (correct reasons
+  shown, repository completely unaffected by the refused attempt,
+  correct manual command printed); and the "no operation recorded
+  yet" case on a fresh repository
+
 ## Next module
 
-Module 10 — Commit Executor. The most safety-critical MVP module:
-creates the actual commits from an approved `TimedCommitPlan`,
-staging only each group's intended files per commit, preserving
-unstaged changes, applying planned timestamps, and stopping
-immediately (with clear recovery instructions pointing at the
-Module 9 checkpoint) if any commit in the sequence fails partway
-through.
+Module 13 — Configuration. `.smartcommit.toml` for the currently
+hardcoded values that would benefit from being adjustable — matcher
+thresholds (`MIN_ASSIGNMENT_SCORE`, `AMBIGUITY_MARGIN` from Module
+7), default timeline interval, and confirmation behavior — with CLI
+flags still taking precedence over the config file, and the config
+file over built-in defaults.
 
 ## Last successful verification
 
 ```text
 cargo build --workspace   → success
-cargo test --workspace    → 72 passed, 0 failed (5 CLI + 67 core)
-(no CLI surface for checkpointing yet — it's invoked internally by Module 10, not a standalone command; verified via unit tests and a manual for-each-ref/branch check)
+cargo test --workspace    → 103 passed, 0 failed (12 CLI + 91 core)
+smartcommit commit --yes then smartcommit restore --yes
+  -> HEAD returns to exact pre-operation commit, both files re-staged automatically, exit 0
+smartcommit restore after an unrelated intervening commit
+  -> Safety: BLOCKED, correct reasons shown, repository untouched, exit 1, manual instructions printed
+smartcommit restore with no prior operation -> "No SmartCommit operation found to restore.", exit 1
 ```

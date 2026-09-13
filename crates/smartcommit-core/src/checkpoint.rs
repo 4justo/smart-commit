@@ -110,7 +110,7 @@ pub fn create_safety_checkpoint(
 /// for a brand-new repo — `NoCommits`) from "git itself couldn't be
 /// run" (`GitUnavailable`) by checking whether git ran at all versus
 /// merely reporting failure.
-fn read_head(repo_root: &Path) -> Result<String, CheckpointError> {
+pub(crate) fn read_head(repo_root: &Path) -> Result<String, CheckpointError> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo_root)
@@ -130,7 +130,7 @@ fn read_head(repo_root: &Path) -> Result<String, CheckpointError> {
 }
 
 /// Reads the current branch name, or `None` if HEAD is detached.
-fn read_branch(repo_root: &Path) -> Result<Option<String>, CheckpointError> {
+pub(crate) fn read_branch(repo_root: &Path) -> Result<Option<String>, CheckpointError> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo_root)
