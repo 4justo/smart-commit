@@ -3,22 +3,18 @@
 //! Turns parsed commit messages, staged files, and Module 6's match
 //! scores into a proposed, non-destructive `CommitPlan`. This module
 //! never touches Git — it only groups.
+//!
+//! # Configuration (Module 13)
+//!
+//! The two key thresholds that control assignment behaviour —
+//! `min_score` and `ambiguity_margin` — are now parameters to
+//! [`build_commit_plan`] rather than hardcoded constants. The CLI
+//! reads them from [`SmartCommitConfig`](crate::SmartCommitConfig)
+//! (loaded via [`load_config`](crate::load_config)) and passes them
+//! through, so a project's `.smartcommit.toml` can tune the matcher
+//! without recompiling.
 
 use crate::{ChangedFile, CommitMessage, MatchScore};
-
-/// A file needs at least this much match-score evidence before the
-/// planner will assign it anywhere. Below this, the evidence is too
-/// weak to act on — this is what turns Module 6's raw "diff-only"
-/// scores (0.15) into an unassigned file rather than a low-confidence
-/// guess.
-const MIN_ASSIGNMENT_SCORE: f32 = 0.3;
-
-/// If a file's best and second-best scores are within this margin of
-/// each other (and the second-best is itself real evidence, not
-/// zero), the file is "matched almost equally to multiple messages"
-/// per modules.md's validation requirement, and is left unassigned
-/// rather than arbitrarily picking the higher one.
-const AMBIGUITY_MARGIN: f32 = 0.1;
 
 /// One proposed commit: a message paired with the files the planner
 /// assigned to it.
@@ -59,13 +55,30 @@ pub struct CommitPlan {
 /// Each file is assigned to at most one message (never split across
 /// commits in the MVP — hunk-level splitting is explicitly out of
 /// scope per modules.md). A file is assigned to its highest-scoring
-/// message only if that score clears `MIN_ASSIGNMENT_SCORE` *and*
-/// isn't within `AMBIGUITY_MARGIN` of its second-best candidate;
-/// otherwise it goes to `unassigned`.
+/// message only if that score clears `min_score` *and* isn't within
+/// `ambiguity_margin` of its second-best candidate; otherwise it
+/// goes to `unassigned`.
+///
+/// # Parameters
+///
+/// - `messages` — the ordered list of intended commit messages, as
+///   parsed from the messages file.
+/// - `files` — the staged files returned by `get_staged_changes`.
+/// - `match_scores` — the full score matrix from
+///   `match_files_to_messages` (every message × file pair).
+/// - `min_score` — minimum score for a file to be assigned at all.
+///   Corresponds to `matching.minimum_confidence` in config.
+///   Typically 0.3. Files below this go to `unassigned`.
+/// - `ambiguity_margin` — if the top two candidates are within this
+///   margin of each other (and both are real evidence), the file is
+///   left unassigned rather than arbitrarily picking one. Corresponds
+///   to `matching.ambiguity_margin` in config. Typically 0.1.
 pub fn build_commit_plan(
     messages: &[CommitMessage],
     files: &[ChangedFile],
     match_scores: &[MatchScore],
+    min_score: f32,
+    ambiguity_margin: f32,
 ) -> CommitPlan {
     let mut assigned: Vec<Option<usize>> = vec![None; files.len()];
     let mut unassigned_reasons: Vec<String> = Vec::new();
@@ -93,7 +106,7 @@ pub fn build_commit_plan(
             continue;
         };
 
-        if best.score < MIN_ASSIGNMENT_SCORE {
+        if best.score < min_score {
             unassigned_reasons.push(format!(
                 "\"{}\" has no matching message (best match was \"{}\" at {:.0}%).",
                 file.path.display(),
@@ -104,7 +117,7 @@ pub fn build_commit_plan(
         }
 
         if let Some(second) = candidates.get(1) {
-            if second.score > 0.0 && (best.score - second.score) < AMBIGUITY_MARGIN {
+            if second.score > 0.0 && (best.score - second.score) < ambiguity_margin {
                 unassigned_reasons.push(format!(
                     "\"{}\" matched almost equally to multiple messages (\"{}\" {:.0}% vs \"{}\" {:.0}%).",
                     file.path.display(),
@@ -183,6 +196,11 @@ mod tests {
     use crate::ChangeKind;
     use std::path::PathBuf;
 
+    // Default thresholds used in every test — mirror the built-in defaults
+    // so existing behaviour is preserved exactly.
+    const MIN: f32 = 0.3;
+    const MARGIN: f32 = 0.1;
+
     fn message(text: &str) -> CommitMessage {
         CommitMessage {
             text: text.to_string(),
@@ -217,7 +235,7 @@ mod tests {
             score(1, 1, 0.85),
         ];
 
-        let plan = build_commit_plan(&messages, &files, &scores);
+        let plan = build_commit_plan(&messages, &files, &scores, MIN, MARGIN);
 
         assert_eq!(plan.groups.len(), 2);
         assert_eq!(plan.groups[0].message, "Fix authentication");
@@ -235,7 +253,7 @@ mod tests {
         let files = vec![file("src/auth/login.rs"), file("src/auth/jwt.rs")];
         let scores = vec![score(0, 0, 0.8), score(0, 1, 0.75)];
 
-        let plan = build_commit_plan(&messages, &files, &scores);
+        let plan = build_commit_plan(&messages, &files, &scores, MIN, MARGIN);
 
         assert_eq!(plan.groups.len(), 1);
         assert_eq!(
@@ -253,7 +271,7 @@ mod tests {
         // Only message 0 has any relevant file; message 1 matches nothing.
         let scores = vec![score(0, 0, 0.9), score(1, 0, 0.0)];
 
-        let plan = build_commit_plan(&messages, &files, &scores);
+        let plan = build_commit_plan(&messages, &files, &scores, MIN, MARGIN);
 
         assert_eq!(plan.groups.len(), 2, "empty group must still be reported, not dropped");
         assert!(plan.groups[1].files.is_empty());
@@ -268,9 +286,10 @@ mod tests {
     fn unassigned_file_with_no_matching_message() {
         let messages = vec![message("Fix authentication")];
         let files = vec![file("src/utils.rs")];
-        let scores = vec![score(0, 0, 0.05)]; // far below MIN_ASSIGNMENT_SCORE
+        // Score well below the minimum_confidence threshold.
+        let scores = vec![score(0, 0, 0.05)];
 
-        let plan = build_commit_plan(&messages, &files, &scores);
+        let plan = build_commit_plan(&messages, &files, &scores, MIN, MARGIN);
 
         assert!(plan.groups[0].files.is_empty());
         assert_eq!(plan.unassigned, vec![file("src/utils.rs")]);
@@ -284,11 +303,11 @@ mod tests {
     fn ambiguous_file_is_left_unassigned_with_a_warning() {
         let messages = vec![message("Fix authentication"), message("Improve dashboard")];
         let files = vec![file("src/shared/utils.rs")];
-        // Both candidates clear MIN_ASSIGNMENT_SCORE, and are within
-        // AMBIGUITY_MARGIN (0.1) of each other.
+        // Both candidates clear the minimum threshold, and are within
+        // the ambiguity margin (0.1) of each other.
         let scores = vec![score(0, 0, 0.45), score(1, 0, 0.42)];
 
-        let plan = build_commit_plan(&messages, &files, &scores);
+        let plan = build_commit_plan(&messages, &files, &scores, MIN, MARGIN);
 
         assert!(plan.groups[0].files.is_empty());
         assert!(plan.groups[1].files.is_empty());
@@ -316,24 +335,39 @@ mod tests {
             score(1, 2, 0.42),
         ];
 
-        let first = build_commit_plan(&messages, &files, &scores);
-        let second = build_commit_plan(&messages, &files, &scores);
+        let first  = build_commit_plan(&messages, &files, &scores, MIN, MARGIN);
+        let second = build_commit_plan(&messages, &files, &scores, MIN, MARGIN);
 
         assert_eq!(first, second);
     }
 
     #[test]
     fn a_close_but_below_threshold_second_place_does_not_trigger_ambiguity() {
-        // Second-best is close in absolute terms but is 0.0 (no real
-        // evidence at all) — should assign confidently, not treat as
-        // ambiguous. Covers the `second.score > 0.0` guard.
+        // Second-best is 0.0 (no real evidence at all) — should assign
+        // confidently, not treat as ambiguous. Covers the
+        // `second.score > 0.0` guard.
         let messages = vec![message("Fix authentication")];
         let files = vec![file("src/auth.rs")];
         let scores = vec![score(0, 0, 0.9)];
 
-        let plan = build_commit_plan(&messages, &files, &scores);
+        let plan = build_commit_plan(&messages, &files, &scores, MIN, MARGIN);
 
         assert_eq!(plan.groups[0].files, vec![file("src/auth.rs")]);
         assert!(plan.unassigned.is_empty());
+    }
+
+    #[test]
+    fn custom_thresholds_are_respected() {
+        // With a raised minimum_confidence of 0.8, a file scoring 0.75
+        // must be left unassigned even though it would have been assigned
+        // at the default 0.3 threshold.
+        let messages = vec![message("Fix authentication")];
+        let files = vec![file("src/auth.rs")];
+        let scores = vec![score(0, 0, 0.75)];
+
+        let plan = build_commit_plan(&messages, &files, &scores, 0.8, MARGIN);
+
+        assert!(plan.groups[0].files.is_empty(), "score 0.75 must be below raised threshold 0.8");
+        assert_eq!(plan.unassigned, vec![file("src/auth.rs")]);
     }
 }
