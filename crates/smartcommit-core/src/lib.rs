@@ -5,6 +5,7 @@
 //! must not depend on `smartcommit-cli`.
 
 mod checkpoint;
+mod config;
 mod diff;
 mod executor;
 mod matcher;
@@ -18,6 +19,9 @@ mod staged_changes;
 mod timeline;
 
 pub use checkpoint::{create_safety_checkpoint, CheckpointError, SafetyCheckpoint};
+pub use config::{
+    load_config, CommitConfig, ConfigError, MatchingConfig, SmartCommitConfig, TimelineConfig,
+};
 pub use diff::{get_staged_diffs, DiffError, DiffHunk, DiffLine, FileDiff};
 pub use executor::{execute_commit_plan, CompletedCommit, ExecutionError, ExecutionFailure, ExecutionReport};
 pub use matcher::{match_files_to_messages, MatchScore};
