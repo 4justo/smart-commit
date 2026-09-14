@@ -14,12 +14,12 @@
 use clap::{Args, Parser, Subcommand};
 use smartcommit_core::{
     build_commit_plan, create_safety_checkpoint, execute_commit_plan, execute_restore,
-    get_staged_changes, get_staged_diffs, inspect_repository_state, manual_recovery_instructions,
-    match_files_to_messages, plan_restore, save_operation_record, ChangeKind, CommitMessages,
-    CommitPlan, DateTime, DiffLine, Duration, ExecutionReport, FileDiff, FixedOffset,
-    InspectorError, OperationRecord, OperationRecordError, ParseCommitMessagesError,
-    PlannedCommitTime, Repository, RepositoryError, RepositorySafety, RestoreError, RestorePlan,
-    StagedChangesError, SystemRandomSource, TimelineMode, Utc,
+    get_staged_changes, get_staged_diffs, inspect_repository_state, load_config,
+    manual_recovery_instructions, match_files_to_messages, plan_restore, save_operation_record,
+    ChangeKind, CommitMessages, CommitPlan, ConfigError, DateTime, DiffLine, Duration,
+    ExecutionReport, FileDiff, FixedOffset, InspectorError, OperationRecord, OperationRecordError,
+    ParseCommitMessagesError, PlannedCommitTime, Repository, RepositoryError, RepositorySafety,
+    RestoreError, RestorePlan, StagedChangesError, SystemRandomSource, TimelineMode, Utc,
 };
 use std::fs;
 use std::io::Write;
@@ -113,9 +113,10 @@ struct TimelineArgs {
 
     /// Fixed interval, in minutes, between consecutive commits.
     /// Ignored if --random-min-minutes/--random-max-minutes are
-    /// given.
-    #[arg(long, default_value_t = 10, value_name = "MINUTES")]
-    interval_minutes: i64,
+    /// given. When omitted, the value from `.smartcommit.toml`
+    /// (or the built-in default of 10) is used instead.
+    #[arg(long, value_name = "MINUTES")]
+    interval_minutes: Option<i64>,
 
     /// Minimum random interval, in minutes, between consecutive
     /// commits. Must be given together with --random-max-minutes.
@@ -135,20 +136,57 @@ struct TimelineArgs {
 }
 
 impl TimelineArgs {
-    fn mode(&self) -> Result<TimelineMode, ExitCode> {
+    /// Resolves the `TimelineMode` for this invocation, applying the
+    /// documented resolution order: CLI flags > config > built-in default.
+    ///
+    /// `config` is the `TimelineConfig` loaded from `.smartcommit.toml`
+    /// (already containing built-in defaults for any absent fields).
+    ///
+    /// # Resolution logic
+    ///
+    /// - If `--random-min-minutes` AND `--random-max-minutes` are both
+    ///   given on the CLI → random mode, CLI values used, config ignored.
+    /// - Else if only one random flag is given → error (must be paired).
+    /// - Else if `--interval-minutes` is given on the CLI → fixed mode,
+    ///   CLI value used.
+    /// - Else if config has both `random_min_minutes` and
+    ///   `random_max_minutes` set → random mode, config values used.
+    /// - Else → fixed mode, `config.gap_minutes` used (which is itself
+    ///   either the config file value or the built-in default of 10).
+    fn mode(&self, config: &smartcommit_core::TimelineConfig) -> Result<TimelineMode, ExitCode> {
         match (self.random_min_minutes, self.random_max_minutes) {
+            // Both CLI random flags given — use them, ignore config.
             (Some(min), Some(max)) => Ok(TimelineMode::Random {
                 min: Duration::minutes(min),
                 max: Duration::minutes(max),
             }),
-            (None, None) => Ok(TimelineMode::Fixed {
-                interval: Duration::minutes(self.interval_minutes),
-            }),
-            _ => {
+            // Only one CLI random flag given — always an error.
+            (Some(_), None) | (None, Some(_)) => {
                 eprintln!(
                     "--random-min-minutes and --random-max-minutes must be given together."
                 );
                 Err(ExitCode::FAILURE)
+            }
+            // No CLI random flags — check whether the user set an explicit
+            // fixed interval, then fall back to config.
+            (None, None) => {
+                if let Some(cli_gap) = self.interval_minutes {
+                    // --interval-minutes given explicitly → fixed mode, CLI wins.
+                    return Ok(TimelineMode::Fixed {
+                        interval: Duration::minutes(cli_gap),
+                    });
+                }
+                // No CLI interval either — use config. If config has a random
+                // range configured, prefer that over fixed mode.
+                match (config.random_min_minutes, config.random_max_minutes) {
+                    (Some(min), Some(max)) => Ok(TimelineMode::Random {
+                        min: Duration::minutes(min as i64),
+                        max: Duration::minutes(max as i64),
+                    }),
+                    _ => Ok(TimelineMode::Fixed {
+                        interval: Duration::minutes(config.gap_minutes as i64),
+                    }),
+                }
             }
         }
     }
@@ -286,17 +324,24 @@ struct Preview {
     staged_file_count: usize,
     plan: CommitPlan,
     timestamps: Vec<PlannedCommitTime>,
+    /// Whether the user (or their config) requires a confirmation prompt
+    /// before commits are actually created. Stored here so `run_commit`
+    /// can honour `commit.require_confirmation = false` from config
+    /// without re-reading the file.
+    require_confirmation: bool,
 }
 
 /// Runs the full preview pipeline in the order `ARCHITECTURE.md`
 /// §34 documents: discover repository -> inspect state -> read
 /// staged changes -> parse messages -> match changes -> build
-/// CommitPlan -> (generate timeline, which §34's diagram doesn't
-/// show for bare `plan` but §11's own Preview section explicitly
-/// requires "Planned timestamps," and §35 confirms it's part of the
-/// `commit` flow too — so it's included here for both). Prints its
-/// own error messages and returns the exit code to use on failure,
-/// matching this file's existing error-handling style.
+/// CommitPlan -> generate timeline. This is the single shared
+/// implementation used by `plan`, `commit --dry-run`, and `commit`,
+/// per §36's requirement that "the same planning code should be used
+/// for dry-run and real execution."
+///
+/// Configuration (Module 13) is loaded from `.smartcommit.toml` at
+/// the repository root immediately after repository discovery. CLI
+/// flags always take precedence over config values.
 fn build_preview(
     repo_path: Option<PathBuf>,
     messages_file: &Path,
@@ -306,6 +351,25 @@ fn build_preview(
     let target = resolve_target(repo_path)?;
 
     let repo = Repository::discover(&target).map_err(report_repository_error)?;
+
+    // Load config right after we know the repo root. A missing file is
+    // not an error — defaults are returned silently. An invalid file is
+    // always a hard error so the user knows their config is broken before
+    // anything else happens.
+    let config = load_config(&repo.root).map_err(|e| {
+        match &e {
+            ConfigError::Io(io_err) => {
+                eprintln!("Could not read .smartcommit.toml: {io_err}");
+            }
+            ConfigError::Parse(msg) => {
+                eprintln!("Could not parse .smartcommit.toml: {msg}");
+            }
+            ConfigError::Validation(msg) => {
+                eprintln!("Invalid .smartcommit.toml: {msg}");
+            }
+        }
+        ExitCode::FAILURE
+    })?;
 
     let state = inspect_repository_state(&repo.root).map_err(report_inspector_error)?;
 
@@ -369,9 +433,22 @@ fn build_preview(
     })?;
 
     let scores = match_files_to_messages(&messages.0, &files, &diffs);
-    let plan = build_commit_plan(&messages.0, &files, &scores);
 
-    let mode = timeline.mode()?;
+    // Pass matching thresholds from config (which already incorporates
+    // built-in defaults for any fields absent from the file).
+    // CLI has no per-flag overrides for these today, so config is the
+    // final word after the built-in default.
+    let plan = build_commit_plan(
+        &messages.0,
+        &files,
+        &scores,
+        config.matching.minimum_confidence,
+        config.matching.ambiguity_margin,
+    );
+
+    // timeline.mode() applies the resolution order: CLI flag (if given)
+    // > config value > built-in default.
+    let mode = timeline.mode(&config.timeline)?;
     let start = timeline.parsed_start()?;
     let mut rng = SystemRandomSource::new();
     let timestamps = smartcommit_core::generate_timeline(
@@ -393,6 +470,7 @@ fn build_preview(
         staged_file_count: files.len(),
         plan,
         timestamps,
+        require_confirmation: config.commit.require_confirmation,
     })
 }
 
@@ -493,7 +571,13 @@ fn run_commit(
         return ExitCode::SUCCESS;
     }
 
-    if !yes {
+    // Resolution order for the confirmation prompt:
+    //   --yes flag (highest priority) > config require_confirmation > built-in default (true)
+    // If the user passed --yes, skip the prompt regardless of config.
+    // If config sets require_confirmation = false, skip the prompt too.
+    // Otherwise ask.
+    let needs_prompt = !yes && preview.require_confirmation;
+    if needs_prompt {
         print!("\nCreate these commits? [y/N] ");
         if std::io::stdout().flush().is_err() {
             // Non-fatal: proceed to read input anyway even if the
