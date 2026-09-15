@@ -23,8 +23,8 @@
 //!   configured gaps. This is the branch that can actually reach a
 //!   future timestamp, so it's the one `allow_future` guards.
 
-use chrono::{DateTime, Duration, FixedOffset};
 use crate::{ChangedFile, CommitPlan};
+use chrono::{DateTime, Duration, FixedOffset};
 
 /// One commit's planned timestamp. `commit_index` matches the
 /// position in the input commit list (0 = first/earliest), so it
@@ -54,7 +54,9 @@ pub enum TimelineError {
     #[error("Fixed timeline interval must be positive")]
     InvalidInterval,
 
-    #[error("Random timeline range is invalid: min ({min:?}) must be >= zero and <= max ({max:?})")]
+    #[error(
+        "Random timeline range is invalid: min ({min:?}) must be >= zero and <= max ({max:?})"
+    )]
     InvalidRange { min: Duration, max: Duration },
 
     #[error(
@@ -562,7 +564,10 @@ mod tests {
 
         assert!(matches!(
             err,
-            TimelineError::FutureTimestamp { commit_index: 1, .. }
+            TimelineError::FutureTimestamp {
+                commit_index: 1,
+                ..
+            }
         ));
     }
 
