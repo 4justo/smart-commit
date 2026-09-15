@@ -170,7 +170,7 @@ fn create_backup_ref(
     now: DateTime<Utc>,
 ) -> Result<String, CheckpointError> {
     // Ref-name-safe: no colons or other characters git refs forbid.
-    let timestamp = now.format("%Y%m%dT%H%M%SZ");
+    let timestamp = now.format("%Y%m%dT%H%M%SZ").to_string();
 
     const MAX_ATTEMPTS: u32 = 1000;
     for attempt in 0..MAX_ATTEMPTS {
@@ -183,7 +183,7 @@ fn create_backup_ref(
         let output = Command::new("git")
             .arg("-C")
             .arg(repo_root)
-            .args(["update-ref", "--create-reflog", &candidate, head_oid, ""])
+            .args(&["update-ref", "--create-reflog", &candidate, head_oid, ""])
             .output()
             .map_err(|e| CheckpointError::GitUnavailable(e.to_string()))?;
 
