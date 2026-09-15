@@ -197,7 +197,10 @@ mod tests {
             .expect("parser should succeed");
 
         assert_eq!(parsed.0.len(), 2);
-        assert_eq!(parsed.0[0].text, "Fix authentication\nAcross multiple lines");
+        assert_eq!(
+            parsed.0[0].text,
+            "Fix authentication\nAcross multiple lines"
+        );
         assert_eq!(parsed.0[1].text, "Update README");
     }
 
