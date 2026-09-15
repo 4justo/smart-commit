@@ -87,8 +87,10 @@ pub fn build_commit_plan(
         // Sort this file's candidate messages best-score-first, with
         // message_id as a tiebreaker so ties resolve the same way on
         // every run.
-        let mut candidates: Vec<&MatchScore> =
-            match_scores.iter().filter(|s| s.file_id == file_id).collect();
+        let mut candidates: Vec<&MatchScore> = match_scores
+            .iter()
+            .filter(|s| s.file_id == file_id)
+            .collect();
         candidates.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
@@ -244,7 +246,9 @@ mod tests {
         assert_eq!(plan.groups[1].message, "Improve dashboard");
         assert_eq!(plan.groups[1].files, vec![file("src/dashboard.rs")]);
         assert!(plan.unassigned.is_empty());
-        assert!(plan.warnings.contains(&"All files were assigned.".to_string()));
+        assert!(plan
+            .warnings
+            .contains(&"All files were assigned.".to_string()));
     }
 
     #[test]
@@ -266,14 +270,21 @@ mod tests {
 
     #[test]
     fn reports_an_empty_group_with_a_warning() {
-        let messages = vec![message("Fix authentication"), message("Add payment validation")];
+        let messages = vec![
+            message("Fix authentication"),
+            message("Add payment validation"),
+        ];
         let files = vec![file("src/auth.rs")];
         // Only message 0 has any relevant file; message 1 matches nothing.
         let scores = vec![score(0, 0, 0.9), score(1, 0, 0.0)];
 
         let plan = build_commit_plan(&messages, &files, &scores, MIN, MARGIN);
 
-        assert_eq!(plan.groups.len(), 2, "empty group must still be reported, not dropped");
+        assert_eq!(
+            plan.groups.len(),
+            2,
+            "empty group must still be reported, not dropped"
+        );
         assert!(plan.groups[1].files.is_empty());
         assert_eq!(plan.groups[1].confidence, 0.0);
         assert!(plan
@@ -335,7 +346,7 @@ mod tests {
             score(1, 2, 0.42),
         ];
 
-        let first  = build_commit_plan(&messages, &files, &scores, MIN, MARGIN);
+        let first = build_commit_plan(&messages, &files, &scores, MIN, MARGIN);
         let second = build_commit_plan(&messages, &files, &scores, MIN, MARGIN);
 
         assert_eq!(first, second);
@@ -367,7 +378,10 @@ mod tests {
 
         let plan = build_commit_plan(&messages, &files, &scores, 0.8, MARGIN);
 
-        assert!(plan.groups[0].files.is_empty(), "score 0.75 must be below raised threshold 0.8");
+        assert!(
+            plan.groups[0].files.is_empty(),
+            "score 0.75 must be below raised threshold 0.8"
+        );
         assert_eq!(plan.unassigned, vec![file("src/auth.rs")]);
     }
 }
