@@ -86,7 +86,11 @@ impl OperationRecord {
             final_head,
             branch: checkpoint.branch.clone(),
             checkpoint_ref: checkpoint.backup_ref.clone(),
-            created_commits: report.completed.iter().map(|c| c.commit_oid.clone()).collect(),
+            created_commits: report
+                .completed
+                .iter()
+                .map(|c| c.commit_oid.clone())
+                .collect(),
             status,
         }
     }
@@ -130,8 +134,11 @@ pub fn save_operation_record(
 
     std::fs::write(smartcommit_dir.join("last-operation.toml"), &toml_text)
         .map_err(|e| OperationRecordError::WriteFailed(e.to_string()))?;
-    std::fs::write(operations_dir.join(format!("{}.toml", record.id)), &toml_text)
-        .map_err(|e| OperationRecordError::WriteFailed(e.to_string()))?;
+    std::fs::write(
+        operations_dir.join(format!("{}.toml", record.id)),
+        &toml_text,
+    )
+    .map_err(|e| OperationRecordError::WriteFailed(e.to_string()))?;
 
     Ok(())
 }
