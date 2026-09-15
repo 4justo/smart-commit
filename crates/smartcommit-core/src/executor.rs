@@ -183,9 +183,13 @@ pub fn execute_commit_plan(
 
         let index_path = temp_area.index_path_for(group_index);
 
-        if let Err(reason) =
-            prepare_temp_index(&repo.root, &index_path, &current_parent, group, &staged_entries)
-        {
+        if let Err(reason) = prepare_temp_index(
+            &repo.root,
+            &index_path,
+            &current_parent,
+            group,
+            &staged_entries,
+        ) {
             failure = Some(ExecutionFailure {
                 group_index,
                 message: group.message.clone(),
@@ -395,7 +399,13 @@ fn add_path(
         .arg("-C")
         .arg(repo_root)
         .env("GIT_INDEX_FILE", index_path)
-        .args(["update-index", "--add", "--cacheinfo", &entry.mode, &entry.blob])
+        .args([
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &entry.mode,
+            &entry.blob,
+        ])
         .arg(&file.path)
         .output()
         .map_err(|e| e.to_string())?;
@@ -468,7 +478,11 @@ fn create_commit(
     Ok(())
 }
 
-fn run_git_capture(repo_root: &Path, args: &[&str], index_file: Option<&Path>) -> Result<String, String> {
+fn run_git_capture(
+    repo_root: &Path,
+    args: &[&str],
+    index_file: Option<&Path>,
+) -> Result<String, String> {
     let mut cmd = Command::new("git");
     cmd.arg("-C").arg(repo_root).args(args);
     if let Some(idx) = index_file {
@@ -614,7 +628,10 @@ mod tests {
         // Each commit's tree must contain exactly the intended
         // content up to that point — b.txt and c.txt still "1" in
         // commit A's tree, only a.txt updated.
-        let tree_after_a = git_output(&dir, &["show", &format!("{}:b.txt", report.completed[0].commit_oid)]);
+        let tree_after_a = git_output(
+            &dir,
+            &["show", &format!("{}:b.txt", report.completed[0].commit_oid)],
+        );
         assert_eq!(tree_after_a, "1");
 
         fs::remove_dir_all(&dir).ok();
@@ -631,7 +648,10 @@ mod tests {
         git(&dir, &["add", "-A"]);
 
         let checkpoint = checkpoint_for(&dir);
-        let groups = vec![group("Update a", vec![changed("a.txt", ChangeKind::Modified)])];
+        let groups = vec![group(
+            "Update a",
+            vec![changed("a.txt", ChangeKind::Modified)],
+        )];
         let ts: DateTime<FixedOffset> = "2026-03-01T09:00:00+00:00".parse().unwrap();
         let timestamps = vec![PlannedCommitTime {
             commit_index: 0,
@@ -644,11 +664,23 @@ mod tests {
         let commit_oid = &report.completed[0].commit_oid;
         let author_date = git_output(
             &dir,
-            &["show", "-s", "--format=%ad", "--date=iso-strict", commit_oid],
+            &[
+                "show",
+                "-s",
+                "--format=%ad",
+                "--date=iso-strict",
+                commit_oid,
+            ],
         );
         let committer_date = git_output(
             &dir,
-            &["show", "-s", "--format=%cd", "--date=iso-strict", commit_oid],
+            &[
+                "show",
+                "-s",
+                "--format=%cd",
+                "--date=iso-strict",
+                commit_oid,
+            ],
         );
         // Compare parsed instants, not raw strings: different git
         // versions render a zero UTC offset differently ("Z" vs
@@ -657,10 +689,12 @@ mod tests {
         // behavior isn't. This was caught by a real test failure on
         // a newer git version than the sandbox's, not anticipated
         // upfront.
-        let parsed_author: DateTime<FixedOffset> =
-            author_date.parse().expect("author date should be valid RFC3339/ISO8601");
-        let parsed_committer: DateTime<FixedOffset> =
-            committer_date.parse().expect("committer date should be valid RFC3339/ISO8601");
+        let parsed_author: DateTime<FixedOffset> = author_date
+            .parse()
+            .expect("author date should be valid RFC3339/ISO8601");
+        let parsed_committer: DateTime<FixedOffset> = committer_date
+            .parse()
+            .expect("committer date should be valid RFC3339/ISO8601");
         assert_eq!(parsed_author, ts);
         assert_eq!(parsed_committer, ts);
 
@@ -685,7 +719,10 @@ mod tests {
         write_file(&dir.join("c.txt"), "1\nunstaged-only\n");
 
         let checkpoint = checkpoint_for(&dir);
-        let groups = vec![group("Update a", vec![changed("a.txt", ChangeKind::Modified)])];
+        let groups = vec![group(
+            "Update a",
+            vec![changed("a.txt", ChangeKind::Modified)],
+        )];
 
         execute_commit_plan(&dir, &groups, None, &checkpoint).expect("should succeed");
 
@@ -713,7 +750,10 @@ mod tests {
         write_file(&dir.join("a.txt"), "working-tree-version-after-staging\n");
 
         let checkpoint = checkpoint_for(&dir);
-        let groups = vec![group("Update a", vec![changed("a.txt", ChangeKind::Modified)])];
+        let groups = vec![group(
+            "Update a",
+            vec![changed("a.txt", ChangeKind::Modified)],
+        )];
 
         let report = execute_commit_plan(&dir, &groups, None, &checkpoint).expect("should succeed");
 
@@ -823,7 +863,10 @@ mod tests {
         );
 
         let head = git_output(&dir, &["rev-parse", "HEAD"]);
-        assert_eq!(head, report.completed[0].commit_oid, "HEAD must not have moved past the successful commit");
+        assert_eq!(
+            head, report.completed[0].commit_oid,
+            "HEAD must not have moved past the successful commit"
+        );
 
         // The real index must still show b.txt staged — the
         // rejected commit must not have consumed it.
@@ -845,13 +888,22 @@ mod tests {
         git(&dir, &["rm", "--quiet", "gone.txt"]);
 
         let checkpoint = checkpoint_for(&dir);
-        let groups = vec![group("Remove gone.txt", vec![changed("gone.txt", ChangeKind::Deleted)])];
+        let groups = vec![group(
+            "Remove gone.txt",
+            vec![changed("gone.txt", ChangeKind::Deleted)],
+        )];
 
         let report = execute_commit_plan(&dir, &groups, None, &checkpoint).expect("should succeed");
 
         assert!(report.is_full_success());
-        let tree = git_output(&dir, &["ls-tree", "--name-only", &report.completed[0].commit_oid]);
-        assert_eq!(tree, "keep.txt", "gone.txt must be absent from the resulting tree");
+        let tree = git_output(
+            &dir,
+            &["ls-tree", "--name-only", &report.completed[0].commit_oid],
+        );
+        assert_eq!(
+            tree, "keep.txt",
+            "gone.txt must be absent from the resulting tree"
+        );
         assert!(dir.join("keep.txt").exists());
         assert!(
             !dir.join("gone.txt").exists(),
@@ -873,14 +925,20 @@ mod tests {
         git(&dir, &["add", "-A"]);
 
         let checkpoint = checkpoint_for(&dir);
-        let groups = vec![group("Add new.txt", vec![changed("new.txt", ChangeKind::Added)])];
+        let groups = vec![group(
+            "Add new.txt",
+            vec![changed("new.txt", ChangeKind::Added)],
+        )];
 
         let report = execute_commit_plan(&dir, &groups, None, &checkpoint).expect("should succeed");
 
         assert!(report.is_full_success());
         let content = git_output(
             &dir,
-            &["show", &format!("{}:new.txt", report.completed[0].commit_oid)],
+            &[
+                "show",
+                &format!("{}:new.txt", report.completed[0].commit_oid),
+            ],
         );
         assert_eq!(content, "brand new");
 
@@ -927,9 +985,20 @@ mod tests {
         // Something else advances HEAD after the checkpoint was taken.
         write_file(&dir.join("b.txt"), "unexpected\n");
         git(&dir, &["add", "b.txt"]);
-        git(&dir, &["commit", "--quiet", "-m", "an unexpected intervening commit"]);
+        git(
+            &dir,
+            &[
+                "commit",
+                "--quiet",
+                "-m",
+                "an unexpected intervening commit",
+            ],
+        );
 
-        let groups = vec![group("Update a", vec![changed("a.txt", ChangeKind::Modified)])];
+        let groups = vec![group(
+            "Update a",
+            vec![changed("a.txt", ChangeKind::Modified)],
+        )];
         let err = execute_commit_plan(&dir, &groups, None, &checkpoint).unwrap_err();
 
         assert!(matches!(err, ExecutionError::HeadMoved { .. }));
