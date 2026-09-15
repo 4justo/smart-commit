@@ -23,7 +23,9 @@ pub use config::{
     load_config, CommitConfig, ConfigError, MatchingConfig, SmartCommitConfig, TimelineConfig,
 };
 pub use diff::{get_staged_diffs, DiffError, DiffHunk, DiffLine, FileDiff};
-pub use executor::{execute_commit_plan, CompletedCommit, ExecutionError, ExecutionFailure, ExecutionReport};
+pub use executor::{
+    execute_commit_plan, CompletedCommit, ExecutionError, ExecutionFailure, ExecutionReport,
+};
 pub use matcher::{match_files_to_messages, MatchScore};
 pub use message_parser::{CommitMessage, CommitMessages, ParseCommitMessagesError};
 pub use operation_record::{
@@ -40,9 +42,9 @@ pub use restore::{
 };
 pub use staged_changes::{get_staged_changes, ChangeKind, ChangedFile, StagedChangesError};
 pub use timeline::{
-    apply_timeline_to_plan, generate_timeline, ApplyTimelineError, PlannedCommitTime,
-    RandomSource, SeededRandomSource, SystemRandomSource, TimedCommitGroup, TimedCommitPlan,
-    TimelineError, TimelineMode,
+    apply_timeline_to_plan, generate_timeline, ApplyTimelineError, PlannedCommitTime, RandomSource,
+    SeededRandomSource, SystemRandomSource, TimedCommitGroup, TimedCommitPlan, TimelineError,
+    TimelineMode,
 };
 
 // Re-exported so downstream crates (smartcommit-cli and later
