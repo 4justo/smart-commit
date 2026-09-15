@@ -162,9 +162,7 @@ impl TimelineArgs {
             }),
             // Only one CLI random flag given — always an error.
             (Some(_), None) | (None, Some(_)) => {
-                eprintln!(
-                    "--random-min-minutes and --random-max-minutes must be given together."
-                );
+                eprintln!("--random-min-minutes and --random-max-minutes must be given together.");
                 Err(ExitCode::FAILURE)
             }
             // No CLI random flags — check whether the user set an explicit
@@ -487,7 +485,12 @@ fn render_preview(preview: &Preview) {
     );
     println!();
     println!("{} staged files", preview.staged_file_count);
-    let proposed = preview.plan.groups.iter().filter(|g| !g.files.is_empty()).count();
+    let proposed = preview
+        .plan
+        .groups
+        .iter()
+        .filter(|g| !g.files.is_empty())
+        .count();
     println!(
         "{} proposed commit{}",
         proposed,
@@ -527,7 +530,11 @@ fn render_preview(preview: &Preview) {
     }
 }
 
-fn run_plan(repo_path: Option<PathBuf>, messages_file: PathBuf, timeline: TimelineArgs) -> ExitCode {
+fn run_plan(
+    repo_path: Option<PathBuf>,
+    messages_file: PathBuf,
+    timeline: TimelineArgs,
+) -> ExitCode {
     let now: DateTime<FixedOffset> = Utc::now().into();
     let preview = match build_preview(repo_path, &messages_file, &timeline, now) {
         Ok(p) => p,
