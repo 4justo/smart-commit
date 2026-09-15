@@ -1,15 +1,13 @@
 //! SmartCommit CLI binary.
 //!
-//! # Module 11 status
-//! `plan` and `commit` now share a full preview pipeline (discover
-//! repository -> inspect state -> read staged changes -> parse
-//! messages -> match -> build plan -> generate timeline -> render),
-//! matching `ARCHITECTURE.md` §34's documented CLI Command Flow.
-//! `commit` adds confirmation (default No, `--yes` to skip),
-//! `--dry-run` (every step except Git modification), a real
-//! checkpoint + execution run, and a completion/failure report
-//! matching §29's format. This is the first point at which the tool
-//! can be used end-to-end from the terminal.
+//! Implements the five user-facing subcommands (`doctor`, `analyze`,
+//! `plan`, `commit`, `restore`) and the shared preview pipeline that
+//! `plan`, `commit --dry-run`, and `commit` all run through.
+//!
+//! Configuration (`.smartcommit.toml`) is loaded immediately after
+//! repository discovery so that a broken config file is always caught
+//! before any Git work begins. CLI flags take precedence over config
+//! values, which take precedence over built-in defaults.
 
 use clap::{Args, Parser, Subcommand};
 use smartcommit_core::{
@@ -26,8 +24,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-/// SmartCommit — a professional Git commit-planning and splitting
-/// tool.
+/// Stage your changes, describe the commits you want, and let
+/// SmartCommit split them safely — with a full preview, optional
+/// timeline control, and a one-step undo if anything looks wrong.
 #[derive(Parser, Debug)]
 #[command(name = "smartcommit", version, about, long_about = None)]
 #[command(arg_required_else_help = true)]
