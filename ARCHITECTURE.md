@@ -2215,18 +2215,24 @@ before implementation began. This addendum tracks how the actual
 workspace maps onto that specification — updated as modules land. For
 exact per-module completion status, see `PROJECT_STATE.md`.
 
-## Actual workspace layout (Module 0)
+## Actual workspace layout (Module 15 / v0.1.0)
 
 ```text
 crates/
-├── smartcommit-core/   library crate — §7.1
-└── smartcommit-cli/    binary crate — §7.2, depends on smartcommit-core
+├── smartcommit-core/        library crate — §7.1
+└── smartcommit-cli/         binary crate — §7.2, depends on smartcommit-core
+    └── tests/
+        ├── cli_invocation.rs   per-module CLI tests (Modules 0–12)
+        └── end_to_end.rs       Module 14 full MVP test suite
+docs/
+└── testing/                 per-module manual testing guides (Modules 0–14)
+CHANGELOG.md                 created in Module 15
+SECURITY.md                  created in Module 15
 ```
 
-This matches §6's target layout. `tests/`, `fixtures/`, and `docs/`
-exist as specified; `CONTRIBUTING.md`, `SECURITY.md`, and
-`CHANGELOG.md` are not yet created (deferred until Module 15 per the
-module build order — no functionality depends on them yet).
+This matches §6's target layout. `CONTRIBUTING.md` is deferred beyond
+v0.1.0 — no functionality depends on it and Module 15 scope is
+release-readiness, not contribution process.
 
 ## Dependency policy in practice
 
@@ -2252,7 +2258,7 @@ architecture.
   the more obvious TOML consumer) but wrong — Module 12's operation
   records need TOML first. Corrected here rather than left standing
   now that it's known to be inaccurate.
-- `anyhow` remains unused as of Module 12.
+- `anyhow` remains unused as of Module 15 / v0.1.0.
 
 ## §9–§14 module-to-file mapping (as implemented)
 
@@ -2270,6 +2276,7 @@ architecture.
 | §25–§29 Execution Layer | `crates/smartcommit-core/src/executor.rs` |
 | §33–§36 CLI Architecture / Command Flow / Dry-Run | `crates/smartcommit-cli/src/main.rs` |
 | §30–§32 Recovery Module / Operation Record / Restore Architecture | `crates/smartcommit-core/src/operation_record.rs`, `crates/smartcommit-core/src/restore.rs` |
+| §37 Configuration | `crates/smartcommit-core/src/config.rs` |
 
 Each is a plain Rust module within `smartcommit-core`, per §8 ("These
 can initially be Rust modules within one crate. They do not need to
@@ -2278,10 +2285,10 @@ become separate crates.").
 ## Git integration approach (relevant to §38, §51, §54)
 
 All Git access so far shells out to the system `git` binary (`std::process::Command`)
-rather than linking `libgit2`/`git2`. This has been sufficient
-through Module 5 (Repository, State, Changes, Diff, Messages) since
-none of those need transactional index control. §27 (Index
-Management) explicitly leaves the final approach open pending
-correctness/safety/testability evaluation — that evaluation is
-deferred to Module 10 (Commit Executor), where index manipulation
-first becomes safety-critical, rather than decided speculatively now.
+rather than linking `libgit2`/`git2`. This was sufficient through the
+entire MVP (Modules 0–14). The temporary-index approach used by the
+commit executor (`GIT_INDEX_FILE`) requires `git commit` to run hooks,
+which rules out pure-library alternatives for that step. §27 (Index
+Management) explicitly left the final approach open pending evaluation
+— the evaluation happened in Module 10, and the shell-out approach was
+confirmed correct, safe, and testable.
