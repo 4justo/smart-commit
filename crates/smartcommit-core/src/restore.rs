@@ -148,7 +148,10 @@ pub fn plan_restore(repo_path: impl AsRef<Path>) -> Result<RestorePlan, RestoreE
 /// on a detached HEAD, HEAD directly) back to `plan.record.original_head`.
 /// Refuses outright if `plan.is_safe` is false — a caller must not
 /// route around an unsafe plan by calling this anyway.
-pub fn execute_restore(repo_path: impl AsRef<Path>, plan: &RestorePlan) -> Result<(), RestoreError> {
+pub fn execute_restore(
+    repo_path: impl AsRef<Path>,
+    plan: &RestorePlan,
+) -> Result<(), RestoreError> {
     if !plan.is_safe {
         return Err(RestoreError::RefusedUnsafePlan);
     }
@@ -214,7 +217,10 @@ fn checkpoint_still_valid(repo_root: &Path, record: &OperationRecord) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{create_safety_checkpoint, execute_commit_plan, save_operation_record, ChangeKind, ChangedFile, CommitGroup};
+    use crate::{
+        create_safety_checkpoint, execute_commit_plan, save_operation_record, ChangeKind,
+        ChangedFile, CommitGroup,
+    };
     use chrono::Utc;
     use std::fs;
     use std::path::PathBuf;
@@ -376,7 +382,10 @@ mod tests {
         write_file(&dir.join("new_untracked.txt"), "untracked\n");
 
         let plan = plan_restore(&dir).expect("plan_restore should succeed");
-        assert!(plan.is_safe, "an unstaged/untracked change alone must not block restore");
+        assert!(
+            plan.is_safe,
+            "an unstaged/untracked change alone must not block restore"
+        );
         assert!(plan.working_tree_has_changes);
 
         execute_restore(&dir, &plan).expect("execute_restore should succeed");
@@ -400,7 +409,10 @@ mod tests {
         // operation finished.
         write_file(&dir.join("c.txt"), "unrelated work\n");
         git(&dir, &["add", "c.txt"]);
-        git(&dir, &["commit", "--quiet", "-m", "an unrelated later commit"]);
+        git(
+            &dir,
+            &["commit", "--quiet", "-m", "an unrelated later commit"],
+        );
 
         let plan = plan_restore(&dir).expect("plan_restore should succeed");
         assert!(!plan.is_safe);
@@ -414,7 +426,11 @@ mod tests {
 
         // HEAD must be completely unaffected by the refused attempt.
         let log = git_output(&dir, &["log", "--oneline"]);
-        assert_eq!(log.lines().count(), 4, "init + 2 operation commits + 1 unrelated, got: {log}");
+        assert_eq!(
+            log.lines().count(),
+            4,
+            "init + 2 operation commits + 1 unrelated, got: {log}"
+        );
 
         fs::remove_dir_all(&dir).ok();
     }
