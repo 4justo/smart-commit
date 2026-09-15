@@ -73,9 +73,7 @@ pub enum DiffError {
 /// Module 3's `get_staged_changes` so the two stay consistent.
 ///
 /// Returns an empty `Vec` when nothing is staged.
-pub fn get_staged_diffs(
-    path: impl AsRef<std::path::Path>,
-) -> Result<Vec<FileDiff>, DiffError> {
+pub fn get_staged_diffs(path: impl AsRef<std::path::Path>) -> Result<Vec<FileDiff>, DiffError> {
     let repo = Repository::discover(path)?;
 
     let output = Command::new("git")
@@ -370,7 +368,10 @@ mod tests {
         assert_eq!(diffs.len(), 1);
         let diff = &diffs[0];
         assert_eq!(diff.deletions, 1, "removed exactly one line (\"two\")");
-        assert_eq!(diff.additions, 2, "added exactly two lines (\"four\", \"five\")");
+        assert_eq!(
+            diff.additions, 2,
+            "added exactly two lines (\"four\", \"five\")"
+        );
 
         fs::remove_dir_all(&dir).ok();
     }
@@ -387,17 +388,20 @@ mod tests {
         git(&dir, &["add", "original.txt"]);
         git(&dir, &["commit", "--quiet", "-m", "add original"]);
 
-        fs::rename(dir.join("original.txt"), dir.join("renamed.txt"))
-            .expect("failed to rename");
+        fs::rename(dir.join("original.txt"), dir.join("renamed.txt")).expect("failed to rename");
         write_file(&dir.join("other.txt"), "unrelated\n");
         git(&dir, &["add", "-A"]);
 
         let diffs = get_staged_diffs(&dir).expect("should succeed");
-        assert_eq!(diffs.len(), 2, "expected the rename plus the new file, got {diffs:?}");
+        assert_eq!(
+            diffs.len(),
+            2,
+            "expected the rename plus the new file, got {diffs:?}"
+        );
 
         let renamed = diffs
             .iter()
-            .find(|d| d.path == PathBuf::from("renamed.txt"))
+            .find(|d| d.path == std::path::Path::new("renamed.txt"))
             .expect("renamed.txt should be present");
         // An unmodified rename has no content diff, so no hunks —
         // it's still correctly identified as renamed.txt rather
