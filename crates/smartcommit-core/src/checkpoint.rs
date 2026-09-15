@@ -55,9 +55,7 @@ pub enum CheckpointError {
     #[error("failed to read staged changes: {0}")]
     StagedChangesUnavailable(#[from] crate::StagedChangesError),
 
-    #[error(
-        "repository has no commits yet (HEAD is unborn) — nothing to checkpoint"
-    )]
+    #[error("repository has no commits yet (HEAD is unborn) — nothing to checkpoint")]
     NoCommits,
 
     #[error("failed to run git: {0}")]
@@ -145,7 +143,11 @@ pub(crate) fn read_branch(repo_root: &Path) -> Result<Option<String>, Checkpoint
     }
 
     let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(if branch.is_empty() { None } else { Some(branch) })
+    Ok(if branch.is_empty() {
+        None
+    } else {
+        Some(branch)
+    })
 }
 
 /// Creates a new, previously-nonexistent ref under
@@ -196,7 +198,9 @@ fn create_backup_ref(
         // silent retries.
         let stderr = String::from_utf8_lossy(&output.stderr);
         if !stderr.contains("already exists") {
-            return Err(CheckpointError::RefCreationFailed(stderr.trim().to_string()));
+            return Err(CheckpointError::RefCreationFailed(
+                stderr.trim().to_string(),
+            ));
         }
     }
 
@@ -330,7 +334,7 @@ mod tests {
 
         // The checkpoint ref must still exist and still point at the
         // pre-operation commit, unaffected by history moving on.
-        let ref_points_to = git_output(&dir, &[&"rev-parse".to_string(), &checkpoint.backup_ref]);
+        let ref_points_to = git_output(&dir, &["rev-parse", &checkpoint.backup_ref]);
         assert_eq!(ref_points_to, original_head);
 
         fs::remove_dir_all(&dir).ok();
@@ -363,7 +367,10 @@ mod tests {
         let after = fs::read_dir(dir.join(".git"))
             .map(|entries| entries.count())
             .unwrap_or(0);
-        assert_eq!(before, after, ".git directory entry count should be unchanged");
+        assert_eq!(
+            before, after,
+            ".git directory entry count should be unchanged"
+        );
 
         fs::remove_dir_all(&dir).ok();
     }
@@ -383,7 +390,11 @@ mod tests {
             first.backup_ref, second.backup_ref,
             "colliding timestamps must produce distinct ref names"
         );
-        assert!(first.backup_ref.ends_with("Z"), "first ref: {}", first.backup_ref);
+        assert!(
+            first.backup_ref.ends_with("Z"),
+            "first ref: {}",
+            first.backup_ref
+        );
         assert!(
             second.backup_ref.ends_with("-1"),
             "second ref should get a -1 suffix, got: {}",
