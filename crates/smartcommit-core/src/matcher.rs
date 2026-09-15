@@ -32,8 +32,8 @@ const EXTENSION_WEIGHT: f32 = 0.1;
 
 const STOPWORDS: &[&str] = &[
     "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from", "has", "have", "if",
-    "in", "into", "is", "it", "its", "of", "on", "or", "that", "the", "this", "to", "was",
-    "were", "will", "with",
+    "in", "into", "is", "it", "its", "of", "on", "or", "that", "the", "this", "to", "was", "were",
+    "will", "with",
 ];
 
 /// One message-file pair's match evidence.
@@ -67,7 +67,10 @@ pub fn match_files_to_messages(
     files: &[ChangedFile],
     diffs: &[FileDiff],
 ) -> Vec<MatchScore> {
-    let file_evidence: Vec<FileEvidence> = files.iter().map(|f| FileEvidence::build(f, diffs)).collect();
+    let file_evidence: Vec<FileEvidence> = files
+        .iter()
+        .map(|f| FileEvidence::build(f, diffs))
+        .collect();
 
     let mut results = Vec::with_capacity(messages.len() * files.len());
     for (message_id, message) in messages.iter().enumerate() {
@@ -223,9 +226,7 @@ fn tokenize(text: &str) -> BTreeSet<String> {
 
     for (i, &c) in chars.iter().enumerate() {
         if c.is_alphanumeric() {
-            let is_camel_boundary = i > 0
-                && c.is_uppercase()
-                && chars[i - 1].is_lowercase();
+            let is_camel_boundary = i > 0 && c.is_uppercase() && chars[i - 1].is_lowercase();
             if is_camel_boundary {
                 push_token(&mut current, &mut tokens);
             }
@@ -328,12 +329,16 @@ mod tests {
             m.score
         );
         assert!(
-            m.reasons.iter().any(|r| r.contains("filename token \"login\"")),
+            m.reasons
+                .iter()
+                .any(|r| r.contains("filename token \"login\"")),
             "reasons was {:?}",
             m.reasons
         );
         assert!(
-            m.reasons.iter().any(|r| r.contains("directory token \"auth\"")),
+            m.reasons
+                .iter()
+                .any(|r| r.contains("directory token \"auth\"")),
             "reasons was {:?}",
             m.reasons
         );
@@ -373,7 +378,10 @@ mod tests {
         let files = vec![file("src/utils.rs")];
         let diffs = vec![diff_with_added_lines(
             "src/utils.rs",
-            &["fn format_for_login_and_dashboard(", "used by auth and dashboard code"],
+            &[
+                "fn format_for_login_and_dashboard(",
+                "used by auth and dashboard code",
+            ],
         )];
 
         let results = match_files_to_messages(&messages, &files, &diffs);
@@ -415,8 +423,14 @@ mod tests {
 
         let results = match_files_to_messages(&messages, &files, &diffs);
 
-        assert!(score_for(&results, 0, 0).score > 0.0, "auth message should match via directory token");
-        assert!(score_for(&results, 1, 0).score > 0.0, "session message should match via filename token");
+        assert!(
+            score_for(&results, 0, 0).score > 0.0,
+            "auth message should match via directory token"
+        );
+        assert!(
+            score_for(&results, 1, 0).score > 0.0,
+            "session message should match via filename token"
+        );
         assert_eq!(
             score_for(&results, 2, 0).score,
             0.0,
@@ -436,7 +450,10 @@ mod tests {
         let first = match_files_to_messages(&messages, &files, &diffs);
         let second = match_files_to_messages(&messages, &files, &diffs);
 
-        assert_eq!(first, second, "identical input must produce identical output, reasons included");
+        assert_eq!(
+            first, second,
+            "identical input must produce identical output, reasons included"
+        );
     }
 
     #[test]
