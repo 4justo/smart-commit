@@ -38,7 +38,7 @@
 //! they're sure — the decision then rests with a human who has full
 //! information, not with SmartCommit guessing.
 
-use crate::checkpoint::{read_branch, read_head};
+use crate::checkpoint::{read_branch, read_head, CheckpointError};
 use crate::{
     inspect_repository_state, load_last_operation_record, InspectorError, OperationRecord,
     OperationRecordError, Repository, RepositoryError,
@@ -96,10 +96,10 @@ pub fn plan_restore(repo_path: impl AsRef<Path>) -> Result<RestorePlan, RestoreE
     let repo = Repository::discover(&repo_path)?;
     let record = load_last_operation_record(&repo.root)?;
 
-    let current_head =
-        read_head(&repo.root).map_err(|e| RestoreError::GitUnavailable(e.to_string()))?;
-    let current_branch =
-        read_branch(&repo.root).map_err(|e| RestoreError::GitUnavailable(e.to_string()))?;
+    let current_head = read_head(&repo.root)
+        .map_err(|e: CheckpointError| RestoreError::GitUnavailable(e.to_string()))?;
+    let current_branch = read_branch(&repo.root)
+        .map_err(|e: CheckpointError| RestoreError::GitUnavailable(e.to_string()))?;
 
     let mut unsafe_reasons = Vec::new();
 
