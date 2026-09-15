@@ -75,18 +75,18 @@ pub enum ConfigError {
 struct RawConfig {
     matching: Option<RawMatchingConfig>,
     timeline: Option<RawTimelineConfig>,
-    commit:   Option<RawCommitConfig>,
+    commit: Option<RawCommitConfig>,
 }
 
 #[derive(Debug, Deserialize, Default)]
 struct RawMatchingConfig {
     minimum_confidence: Option<f32>,
-    ambiguity_margin:   Option<f32>,
+    ambiguity_margin: Option<f32>,
 }
 
 #[derive(Debug, Deserialize, Default)]
 struct RawTimelineConfig {
-    gap_minutes:        Option<u64>,
+    gap_minutes: Option<u64>,
     random_min_minutes: Option<u64>,
     random_max_minutes: Option<u64>,
 }
@@ -105,7 +105,7 @@ struct RawCommitConfig {
 /// the built-in defaults. The CLI layer reads this once after repository
 /// discovery and uses it to supply defaults wherever no explicit flag was
 /// given by the user.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct SmartCommitConfig {
     /// Controls how the file matcher assigns staged files to commit messages.
     pub matching: MatchingConfig,
@@ -198,16 +198,6 @@ pub struct CommitConfig {
 
 // ── Default implementations ───────────────────────────────────────────────────
 
-impl Default for SmartCommitConfig {
-    fn default() -> Self {
-        Self {
-            matching: MatchingConfig::default(),
-            timeline: TimelineConfig::default(),
-            commit:   CommitConfig::default(),
-        }
-    }
-}
-
 impl Default for MatchingConfig {
     /// Returns the same values that were previously hardcoded as
     /// `MIN_ASSIGNMENT_SCORE` (0.3) and `AMBIGUITY_MARGIN` (0.1) in
@@ -217,7 +207,7 @@ impl Default for MatchingConfig {
     fn default() -> Self {
         Self {
             minimum_confidence: 0.3,
-            ambiguity_margin:   0.1,
+            ambiguity_margin: 0.1,
         }
     }
 }
@@ -239,7 +229,9 @@ impl Default for TimelineConfig {
 
 impl Default for CommitConfig {
     fn default() -> Self {
-        Self { require_confirmation: true }
+        Self {
+            require_confirmation: true,
+        }
     }
 }
 
@@ -276,15 +268,16 @@ pub fn load_config(repo_root: &Path) -> Result<SmartCommitConfig, ConfigError> {
 
     let text = std::fs::read_to_string(&config_path)?;
 
-    let raw: RawConfig = toml::from_str(&text)
-        .map_err(|e| ConfigError::Parse(e.to_string()))?;
+    let raw: RawConfig = toml::from_str(&text).map_err(|e| ConfigError::Parse(e.to_string()))?;
 
     // ── [matching] ────────────────────────────────────────────────────────────
     let matching = {
         let raw = raw.matching.unwrap_or_default();
         let defaults = MatchingConfig::default();
-        let minimum_confidence = raw.minimum_confidence.unwrap_or(defaults.minimum_confidence);
-        let ambiguity_margin   = raw.ambiguity_margin.unwrap_or(defaults.ambiguity_margin);
+        let minimum_confidence = raw
+            .minimum_confidence
+            .unwrap_or(defaults.minimum_confidence);
+        let ambiguity_margin = raw.ambiguity_margin.unwrap_or(defaults.ambiguity_margin);
 
         if !(0.0..=1.0).contains(&minimum_confidence) {
             return Err(ConfigError::Validation(format!(
@@ -297,13 +290,18 @@ pub fn load_config(repo_root: &Path) -> Result<SmartCommitConfig, ConfigError> {
             )));
         }
 
-        MatchingConfig { minimum_confidence, ambiguity_margin }
+        MatchingConfig {
+            minimum_confidence,
+            ambiguity_margin,
+        }
     };
 
     // ── [timeline] ────────────────────────────────────────────────────────────
     let timeline = {
         let raw = raw.timeline.unwrap_or_default();
-        let gap_minutes = raw.gap_minutes.unwrap_or(TimelineConfig::default().gap_minutes);
+        let gap_minutes = raw
+            .gap_minutes
+            .unwrap_or(TimelineConfig::default().gap_minutes);
 
         if gap_minutes == 0 {
             return Err(ConfigError::Validation(
@@ -345,7 +343,11 @@ pub fn load_config(repo_root: &Path) -> Result<SmartCommitConfig, ConfigError> {
             }
         };
 
-        TimelineConfig { gap_minutes, random_min_minutes, random_max_minutes }
+        TimelineConfig {
+            gap_minutes,
+            random_min_minutes,
+            random_max_minutes,
+        }
     };
 
     // ── [commit] ─────────────────────────────────────────────────────────────
@@ -358,7 +360,11 @@ pub fn load_config(repo_root: &Path) -> Result<SmartCommitConfig, ConfigError> {
         }
     };
 
-    Ok(SmartCommitConfig { matching, timeline, commit })
+    Ok(SmartCommitConfig {
+        matching,
+        timeline,
+        commit,
+    })
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -384,7 +390,7 @@ mod tests {
         dir
     }
 
-    fn write_config(dir: &PathBuf, content: &str) {
+    fn write_config(dir: &Path, content: &str) {
         fs::write(dir.join(".smartcommit.toml"), content)
             .expect("failed to write .smartcommit.toml in temp dir");
     }
@@ -402,7 +408,9 @@ mod tests {
     #[test]
     fn parses_a_fully_specified_config_file() {
         let dir = temp_dir();
-        write_config(&dir, r#"
+        write_config(
+            &dir,
+            r#"
 [matching]
 minimum_confidence = 0.70
 ambiguity_margin   = 0.05
@@ -412,11 +420,12 @@ gap_minutes = 15
 
 [commit]
 require_confirmation = false
-"#);
+"#,
+        );
         let config = load_config(&dir).unwrap();
 
         assert!((config.matching.minimum_confidence - 0.70).abs() < 1e-6);
-        assert!((config.matching.ambiguity_margin   - 0.05).abs() < 1e-6);
+        assert!((config.matching.ambiguity_margin - 0.05).abs() < 1e-6);
         assert_eq!(config.timeline.gap_minutes, 15);
         assert!(!config.commit.require_confirmation);
     }
@@ -500,16 +509,22 @@ require_confirmation = false
     #[test]
     fn parses_random_range_config() {
         let dir = temp_dir();
-        write_config(&dir, r#"
+        write_config(
+            &dir,
+            r#"
 [timeline]
 random_min_minutes = 5
 random_max_minutes = 30
-"#);
+"#,
+        );
         let config = load_config(&dir).unwrap();
         assert_eq!(config.timeline.random_min_minutes, Some(5));
         assert_eq!(config.timeline.random_max_minutes, Some(30));
         // gap_minutes still defaults when not specified
-        assert_eq!(config.timeline.gap_minutes, TimelineConfig::default().gap_minutes);
+        assert_eq!(
+            config.timeline.gap_minutes,
+            TimelineConfig::default().gap_minutes
+        );
     }
 
     #[test]
@@ -533,7 +548,10 @@ random_max_minutes = 30
     fn rejects_inverted_random_range() {
         // max < min is always an error regardless of the values.
         let dir = temp_dir();
-        write_config(&dir, "[timeline]\nrandom_min_minutes = 30\nrandom_max_minutes = 5\n");
+        write_config(
+            &dir,
+            "[timeline]\nrandom_min_minutes = 30\nrandom_max_minutes = 5\n",
+        );
         let err = load_config(&dir).unwrap_err();
         assert!(matches!(err, ConfigError::Validation(_)));
     }
@@ -541,7 +559,10 @@ random_max_minutes = 30
     #[test]
     fn rejects_zero_random_min() {
         let dir = temp_dir();
-        write_config(&dir, "[timeline]\nrandom_min_minutes = 0\nrandom_max_minutes = 10\n");
+        write_config(
+            &dir,
+            "[timeline]\nrandom_min_minutes = 0\nrandom_max_minutes = 10\n",
+        );
         let err = load_config(&dir).unwrap_err();
         assert!(matches!(err, ConfigError::Validation(_)));
     }
