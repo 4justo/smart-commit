@@ -97,7 +97,10 @@ fn version_flag_prints_version_and_exits_zero() {
         .output()
         .expect("failed to run smartcommit binary");
 
-    assert!(output.status.success(), "smartcommit --version should exit 0");
+    assert!(
+        output.status.success(),
+        "smartcommit --version should exit 0"
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("smartcommit"),
@@ -137,15 +140,27 @@ fn plan_builds_a_commit_plan_from_staged_changes() {
         .expect("failed to run smartcommit binary");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "smartcommit plan should exit 0, stdout: {stdout}");
+    assert!(
+        output.status.success(),
+        "smartcommit plan should exit 0, stdout: {stdout}"
+    );
 
     assert!(stdout.contains("SMARTCOMMIT PLAN"), "stdout: {stdout}");
     assert!(stdout.contains("3 staged files"), "stdout: {stdout}");
     assert!(stdout.contains("2 proposed commits"), "stdout: {stdout}");
-    assert!(stdout.contains("[1] Fix authentication in login module"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("[1] Fix authentication in login module"),
+        "stdout: {stdout}"
+    );
     assert!(stdout.contains("src/auth/login.rs"), "stdout: {stdout}");
-    assert!(stdout.contains("[2] Improve dashboard widgets"), "stdout: {stdout}");
-    assert!(stdout.contains("src/dashboard/widgets.rs"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("[2] Improve dashboard widgets"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("src/dashboard/widgets.rs"),
+        "stdout: {stdout}"
+    );
     assert!(stdout.contains("Confidence:"), "stdout: {stdout}");
     assert!(stdout.contains("Time:"), "stdout: {stdout}");
     assert!(stdout.contains("Unassigned:"), "stdout: {stdout}");
@@ -173,9 +188,15 @@ fn plan_reports_no_staged_changes() {
         .output()
         .expect("failed to run smartcommit binary");
 
-    assert!(!output.status.success(), "smartcommit plan should fail with nothing staged");
+    assert!(
+        !output.status.success(),
+        "smartcommit plan should fail with nothing staged"
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("No staged changes found."), "stdout: {stdout}");
+    assert!(
+        stdout.contains("No staged changes found."),
+        "stdout: {stdout}"
+    );
 
     fs::remove_dir_all(&dir).ok();
 }
@@ -250,7 +271,10 @@ fn plan_refuses_when_repository_is_blocked_by_a_merge_conflict() {
         .output()
         .expect("failed to run smartcommit binary");
 
-    assert!(!output.status.success(), "smartcommit plan should refuse on a blocked repo");
+    assert!(
+        !output.status.success(),
+        "smartcommit plan should refuse on a blocked repo"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("not in a safe state") && stderr.contains("merge is in progress"),
@@ -281,14 +305,23 @@ fn commit_dry_run_makes_no_git_modification() {
         .expect("failed to run smartcommit binary");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "dry-run should exit 0, stdout: {stdout}");
+    assert!(
+        output.status.success(),
+        "dry-run should exit 0, stdout: {stdout}"
+    );
     assert!(stdout.contains("SMARTCOMMIT PLAN"), "stdout: {stdout}");
-    assert!(stdout.contains("Dry run: no changes were made."), "stdout: {stdout}");
+    assert!(
+        stdout.contains("Dry run: no changes were made."),
+        "stdout: {stdout}"
+    );
 
     let log_after = git_output(&repo, &["log", "--oneline"]);
     let status_after = git_output(&repo, &["status", "--short"]);
     assert_eq!(log_before, log_after, "dry-run must not create any commits");
-    assert_eq!(status_before, status_after, "dry-run must not change staged/unstaged state");
+    assert_eq!(
+        status_before, status_after,
+        "dry-run must not change staged/unstaged state"
+    );
 
     fs::remove_dir_all(&repo).ok();
 }
@@ -311,8 +344,14 @@ fn commit_with_yes_creates_real_commits() {
         .expect("failed to run smartcommit binary");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "smartcommit commit --yes should exit 0, stdout: {stdout}");
-    assert!(stdout.contains("All commits created successfully."), "stdout: {stdout}");
+    assert!(
+        output.status.success(),
+        "smartcommit commit --yes should exit 0, stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("All commits created successfully."),
+        "stdout: {stdout}"
+    );
 
     let log = git_output(&repo, &["log", "--oneline", "--reverse"]);
     // initial commit + 2 new ones from the plan.
@@ -367,7 +406,10 @@ fn commit_without_yes_defaults_to_no_on_empty_input() {
     assert!(stdout.contains("Cancelled."), "stdout: {stdout}");
 
     let log_after = git_output(&repo, &["log", "--oneline"]);
-    assert_eq!(log_before, log_after, "declining must not create any commits");
+    assert_eq!(
+        log_before, log_after,
+        "declining must not create any commits"
+    );
 
     fs::remove_dir_all(&repo).ok();
 }
@@ -403,7 +445,10 @@ fn restore_reverts_a_successful_commit_and_restages_its_files() {
     assert!(restore_output.status.success(), "stdout: {stdout}");
     assert!(stdout.contains("SMARTCOMMIT RESTORE"), "stdout: {stdout}");
     assert!(stdout.contains("Safety: OK"), "stdout: {stdout}");
-    assert!(stdout.contains(&format!("Restored to {original_head}")), "stdout: {stdout}");
+    assert!(
+        stdout.contains(&format!("Restored to {original_head}")),
+        "stdout: {stdout}"
+    );
 
     let head_after = git_output(&repo, &["rev-parse", "HEAD"]);
     assert_eq!(head_after, original_head);
@@ -421,7 +466,11 @@ fn restore_reverts_a_successful_commit_and_restages_its_files() {
     staged_files.sort();
     assert_eq!(
         staged_files,
-        vec!["src/auth/login.rs", "src/dashboard/widgets.rs", "src/shared/config.rs"]
+        vec![
+            "src/auth/login.rs",
+            "src/dashboard/widgets.rs",
+            "src/shared/config.rs"
+        ]
     );
 
     fs::remove_dir_all(&repo).ok();
@@ -449,7 +498,10 @@ fn restore_refuses_when_a_later_commit_exists() {
 
     write_file(&repo.join("unrelated.txt"), "unrelated work\n");
     git(&repo, &["add", "unrelated.txt"]);
-    git(&repo, &["commit", "--quiet", "-m", "an unrelated later commit"]);
+    git(
+        &repo,
+        &["commit", "--quiet", "-m", "an unrelated later commit"],
+    );
 
     let restore_output = Command::new(cargo_bin_path())
         .arg("--repo")
@@ -489,7 +541,10 @@ fn restore_reports_no_operation_when_none_exists() {
 
     assert!(!output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("No SmartCommit operation found to restore."), "stdout: {stdout}");
+    assert!(
+        stdout.contains("No SmartCommit operation found to restore."),
+        "stdout: {stdout}"
+    );
 
     fs::remove_dir_all(&dir).ok();
 }
