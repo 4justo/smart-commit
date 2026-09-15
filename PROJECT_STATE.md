@@ -751,23 +751,135 @@ tool** — the full core loop (`git add .` → `smartcommit plan` →
   correct manual command printed); and the "no operation recorded
   yet" case on a fresh repository
 
-## Next module
+## Module 13 — Configuration ✅
 
-Module 13 — Configuration. `.smartcommit.toml` for the currently
-hardcoded values that would benefit from being adjustable — matcher
-thresholds (`MIN_ASSIGNMENT_SCORE`, `AMBIGUITY_MARGIN` from Module
-7), default timeline interval, and confirmation behavior — with CLI
-flags still taking precedence over the config file, and the config
-file over built-in defaults.
+- `smartcommit-core::load_config(repo_root)` — loads
+  `.smartcommit.toml` from the repository root. A missing file is not
+  an error; an invalid file (bad TOML syntax or out-of-range value)
+  is always a hard error reported before any Git work begins.
+- `SmartCommitConfig { matching, timeline, commit }` — fully resolved
+  config; every field guaranteed to hold a valid, in-range value
+  (either from the file or from the built-in default).
+- `MatchingConfig { minimum_confidence, ambiguity_margin }` —
+  previously hardcoded in `planner.rs` as `MIN_ASSIGNMENT_SCORE`
+  (0.3) and `AMBIGUITY_MARGIN` (0.1). Making them configurable lets
+  teams tune the matcher for their codebase layout without recompiling.
+- `TimelineConfig { gap_minutes, random_min_minutes,
+  random_max_minutes }` — default fixed interval (10 min) or optional
+  random range; `random_min` and `random_max` must both be present or
+  both absent (either alone is a validation error).
+- `CommitConfig { require_confirmation }` — `false` makes
+  non-interactive execution the default (equivalent to always passing
+  `--yes`); `--yes` still overrides this when given.
+- Resolution order: CLI flag > `.smartcommit.toml` > built-in
+  default. `load_config` handles the file layer only; the CLI applies
+  flag overrides on top of the returned struct.
+- `ConfigError`: `Io` (file unreadable), `Parse` (invalid TOML),
+  `Validation` (value out of range). All three produce readable
+  messages mentioning `.smartcommit.toml`. No panics.
+- `build_commit_plan` now takes `min_score` and `ambiguity_margin` as
+  explicit parameters instead of hardcoded constants — the CLI passes
+  `config.matching.*` through, and the planner's own tests use the
+  same default values as before so pre-existing behaviour is
+  unchanged.
+- New dependency: none beyond `serde` + `toml` already added in
+  Module 12. `toml` pinned to `0.5` to avoid `indexmap`/`hashbrown`
+  transitive requirements incompatible with the sandbox's cargo 1.75.
+- Tests: 16 unit tests in `config.rs` covering defaults, full
+  parse, partial parse (missing fields fall back to defaults), empty
+  file, invalid syntax, out-of-range values (both above and below),
+  random range (valid, inverted, one-sided), zero `gap_minutes`, and
+  zero `random_min_minutes`.
+- Manually verified: default run (no file), a full config, a high
+  `minimum_confidence` forcing a file into Unassigned, `gap_minutes`
+  reflected in `Time:` output, CLI `--interval-minutes` overriding
+  config, `require_confirmation = false` skipping the prompt,
+  `--yes` overriding `require_confirmation = true`, broken TOML
+  rejected before any Git work, out-of-range value rejected.
+
+## Module 14 — End-to-End MVP Test Suite ✅
+
+- `crates/smartcommit-cli/tests/end_to_end.rs` — 17 integration tests
+  that drive the real `smartcommit` binary against temporary Git
+  repositories. Never touches the SmartCommit repository itself.
+- All 17 scenarios from `modules.md` Module 14 are covered:
+  1. Main scenario — three files, three correctly-scoped commits,
+     each commit contains only its own file
+  2. No repository — non-zero exit, readable error, no panic
+  3. No staged changes — `No staged changes found.`, exit 1
+  4. One message — single commit created
+  5. Multiple messages — all messages in history in order
+  6. Ambiguous file — appears in `Unassigned:`, never committed
+  7. Unassigned file — stays staged after operation, absent from
+     every commit tree
+  8. Added file — present in commit tree
+  9. Deleted file — removed from tree and from disk
+  10. Unstaged changes preserved — working-tree edit and scratch file
+      survive; commit contains the staged version, not the later edit
+  11. Timeline timestamps — 15-minute gap between author dates verified
+  12. Dry run — `git log` and `git status` byte-identical before/after
+  13. User cancellation — exit code 2, no commits created
+  14. Recovery checkpoint — ref under `refs/smartcommit/backups/`
+      points to original HEAD, hidden from `git branch`
+  15. Restore — HEAD reset, originally-staged files re-staged
+  16. Binary file — no panic in `plan` or `commit`
+  17. Invalid config — broken TOML and out-of-range value both caught
+      before any Git work; no commits created, no panic
+- Pre-existing clippy warnings surfaced by `-D warnings` and fixed as
+  part of this module: `derivable_impls` on `SmartCommitConfig`
+  (replaced manual `impl Default` with `#[derive(Default)]`),
+  `ptr_arg` in `write_config` test helper (`&PathBuf` → `&Path`),
+  `unnecessary_to_owned` in checkpoint test, `cmp_owned` in diff test.
+- All three Module 14 completion criteria pass:
+  - `cargo fmt --check` → clean
+  - `cargo clippy --workspace --all-targets -- -D warnings` → clean
+  - `cargo test --workspace` → 135 passed, 0 failed
+    (12 cli_invocation + 17 end_to_end + 106 core)
+- Manual testing guide: `docs/testing/module-14.md`
+
+## Module 15 — MVP Polish and Release Preparation ✅
+
+- CLI help text reviewed and polished for all subcommands.
+- Module-level doc comment in `main.rs` updated to reflect current
+  state (was still labelled "Module 11 status").
+- `CHANGELOG.md` created — v0.1.0 entry documenting the full MVP.
+- `SECURITY.md` created — repository safety model, recovery path, and
+  scope of what SmartCommit does and does not do to your repo.
+- `ARCHITECTURE.md` implementation-status addendum updated for Modules
+  13 and 14, dependency table corrected, workspace layout updated.
+- `README.md` updated — correct status header, `.smartcommit.toml`
+  configuration section added, accurate project layout.
+- `PROJECT_STATE.md` updated with Module 13, 14, and 15 entries.
+- Final verification:
+  - `cargo fmt` → clean
+  - `cargo clippy --workspace --all-targets -- -D warnings` → clean
+  - `cargo test --workspace` → 135 passed, 0 failed
+  - `cargo build --release` → success
+
+## Current module
+
+None. MVP complete. Ready to tag v0.1.0.
 
 ## Last successful verification
 
 ```text
-cargo build --workspace   → success
-cargo test --workspace    → 103 passed, 0 failed (12 CLI + 91 core)
+cargo fmt --check                                    → clean
+cargo clippy --workspace --all-targets -- -D warnings → clean
+cargo build --workspace                              → success
+cargo build --release                                → success
+cargo test --workspace                               → 135 passed, 0 failed
+                                                       (12 cli_invocation +
+                                                        17 end_to_end +
+                                                       106 core)
+
 smartcommit commit --yes then smartcommit restore --yes
-  -> HEAD returns to exact pre-operation commit, both files re-staged automatically, exit 0
+  → HEAD returns to exact pre-operation commit, files re-staged, exit 0
 smartcommit restore after an unrelated intervening commit
-  -> Safety: BLOCKED, correct reasons shown, repository untouched, exit 1, manual instructions printed
-smartcommit restore with no prior operation -> "No SmartCommit operation found to restore.", exit 1
+  → Safety: BLOCKED, reasons shown, repository untouched, exit 1
+smartcommit restore with no prior operation
+  → "No SmartCommit operation found to restore.", exit 1
+smartcommit commit --messages-file … --dry-run
+  → full preview, "Dry run: no changes were made.", exit 0
+smartcommit plan with .smartcommit.toml gap_minutes = 30
+  → Time: lines 30 minutes apart
 ```
