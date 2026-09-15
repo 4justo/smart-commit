@@ -74,9 +74,7 @@ pub enum InspectorError {
 
 // Inspect the current repository state by asking Git for porcelain v2 output.
 // This builds the Module 2 model without mutating the repository.
-pub fn inspect_repository_state(
-    path: impl AsRef<Path>,
-) -> Result<RepositoryState, InspectorError> {
+pub fn inspect_repository_state(path: impl AsRef<Path>) -> Result<RepositoryState, InspectorError> {
     // Module 1 handles repo discovery and path validation.
     let repo = Repository::discover(path)?;
 
@@ -171,8 +169,8 @@ pub fn inspect_repository_state(
 
     // Rebase uses either `rebase-apply` or `rebase-merge`, depending on how
     // Git started the operation.
-    state.rebase_in_progress = repo.git_dir.join("rebase-apply").exists()
-        || repo.git_dir.join("rebase-merge").exists();
+    state.rebase_in_progress =
+        repo.git_dir.join("rebase-apply").exists() || repo.git_dir.join("rebase-merge").exists();
 
     Ok(state)
 }
