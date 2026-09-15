@@ -64,12 +64,11 @@ impl Repository {
             return Err(RepositoryError::PathNotFound(path.to_path_buf()));
         }
 
-        let canonical = std::fs::canonicalize(path).map_err(|e| {
-            RepositoryError::PathNotAccessible {
+        let canonical =
+            std::fs::canonicalize(path).map_err(|e| RepositoryError::PathNotAccessible {
                 path: path.to_path_buf(),
                 reason: e.to_string(),
-            }
-        })?;
+            })?;
 
         // --absolute-git-dir and --is-bare-repository can be
         // combined and both succeed for bare AND non-bare repos.
@@ -222,7 +221,10 @@ mod tests {
         run_git(&parent, &["init", "--quiet", "--bare", "repo.git"]);
 
         let info = Repository::discover(&bare_dir).expect("expected discovery to succeed");
-        assert!(info.is_bare, "expected a bare repository to be detected as bare");
+        assert!(
+            info.is_bare,
+            "expected a bare repository to be detected as bare"
+        );
         assert_eq!(
             info.root,
             fs::canonicalize(&bare_dir).unwrap(),
