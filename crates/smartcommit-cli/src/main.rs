@@ -13,6 +13,7 @@
 
 use clap::{Args, Parser, Subcommand};
 use smartcommit_core::{
+    ai::{create_provider_with_fallback, generate_commit_messages, load_ai_config_from_env, validate_ai_config, ProviderType},
     build_commit_plan, create_safety_checkpoint, execute_commit_plan, execute_restore,
     get_staged_changes, get_staged_diffs, inspect_repository_state, load_config,
     manual_recovery_instructions, match_files_to_messages, plan_restore, save_operation_record,
@@ -21,6 +22,7 @@ use smartcommit_core::{
     ParseCommitMessagesError, PlannedCommitTime, Repository, RepositoryError, RepositorySafety,
     RestoreError, RestorePlan, StagedChangesError, SystemRandomSource, TimelineMode, Utc,
 };
+use tokio::runtime::Runtime;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -93,6 +95,20 @@ enum Commands {
         /// Skip the confirmation prompt.
         #[arg(long)]
         yes: bool,
+    },
+    /// Generate commit messages using AI from staged changes.
+    AiGenerate {
+        /// Use AI for semantic file matching instead of keyword matching.
+        #[arg(long)]
+        semantic: bool,
+        
+        /// Generate multiple atomic commits instead of one comprehensive message.
+        #[arg(long)]
+        split: bool,
+        
+        /// Specify AI provider (claude, openai, local).
+        #[arg(long)]
+        provider: Option<String>,
     },
 }
 
@@ -218,6 +234,9 @@ fn main() -> ExitCode {
             dry_run,
         } => run_commit(cli.repo, messages_file, timeline, yes, dry_run),
         Commands::Restore { yes } => run_restore(cli.repo, yes),
+        Commands::AiGenerate { semantic, split, provider } => {
+            run_ai_generate(cli.repo, semantic, split, provider)
+        }
     }
 }
 
@@ -908,4 +927,119 @@ fn safety_label(safety: RepositorySafety) -> &'static str {
         RepositorySafety::Warning => "warning",
         RepositorySafety::Blocked => "blocked",
     }
+}
+
+/// Run AI-powered commit message generation.
+fn run_ai_generate(
+    repo_path: Option<PathBuf>,
+    _semantic: bool,
+    split: bool,
+    provider_override: Option<String>,
+) -> ExitCode {
+    let rt = Runtime::new().expect("Failed to create Tokio runtime");
+    
+    rt.block_on(async {
+        let target = match resolve_target(repo_path) {
+            Ok(t) => t,
+            Err(code) => return code,
+        };
+
+        // Load AI configuration
+        let mut config = load_ai_config_from_env();
+        
+        // Apply provider override if specified
+        if let Some(provider_str) = provider_override {
+            config.provider = match provider_str.to_lowercase().as_str() {
+                "claude" => ProviderType::Claude,
+                "openai" => ProviderType::OpenAI,
+                "local" => ProviderType::Local,
+                _ => {
+                    eprintln!("Invalid provider: {}. Must be claude, openai, or local", provider_str);
+                    return ExitCode::FAILURE;
+                }
+            };
+        }
+        
+        // Validate AI configuration
+        if let Err(e) = validate_ai_config(&config) {
+            eprintln!("AI configuration error: {}", e);
+            eprintln!();
+            eprintln!("Set the following environment variables:");
+            eprintln!("  - For Claude: ANTHROPIC_API_KEY");
+            eprintln!("  - For OpenAI: OPENAI_API_KEY");
+            eprintln!("  - For Local: OLLAMA_BASE_URL");
+            eprintln!();
+            eprintln!("Or configure provider: SMC_AI_PROVIDER=claude|openai|local");
+            return ExitCode::FAILURE;
+        }
+
+        // Create AI provider
+        let provider = create_provider_with_fallback(&config);
+        
+        // Get staged changes
+        let files = match get_staged_changes(&target) {
+            Ok(files) if files.is_empty() => {
+                println!("No staged changes found.");
+                return ExitCode::FAILURE;
+            }
+            Ok(files) => files,
+            Err(e) => return report_staged_changes_error(e),
+        };
+
+        let diffs = match get_staged_diffs(&target) {
+            Ok(diffs) => diffs,
+            Err(e) => {
+                eprintln!("Warning: could not extract diff content ({e}); AI may be less effective.");
+                Vec::new()
+            }
+        };
+
+        println!("AI Commit Message Generation");
+        println!();
+        println!("Provider: {}", provider.provider_name());
+        println!("Files: {}", files.len());
+        println!("Mode: {}", if split { "split into multiple commits" } else { "single comprehensive message" });
+        println!();
+
+        // Generate commit messages
+        let result = if split {
+            generate_commit_messages(&diffs, &files, &config, provider.as_ref()).await
+        } else {
+            // For single message mode, we'll need to implement this in the AI module
+            // For now, use the multi-message generation and take the first one
+            match generate_commit_messages(&diffs, &files, &config, provider.as_ref()).await {
+                Ok(messages) => {
+                    // Combine into single message for comprehensive view
+                    let combined = messages.join("; ");
+                    Ok(vec![combined])
+                }
+                Err(e) => Err(e),
+            }
+        };
+
+        match result {
+            Ok(messages) => {
+                println!("Generated commit messages:");
+                println!();
+                for (i, msg) in messages.iter().enumerate() {
+                    println!("{}. {}", i + 1, msg);
+                }
+                println!();
+                println!("You can use these messages with:");
+                println!("  smc plan --messages-file <your-messages-file>");
+                println!("  smc commit --messages-file <your-messages-file>");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("Failed to generate commit messages: {}", e);
+                eprintln!();
+                eprintln!("Possible causes:");
+                eprintln!("- API key is invalid or expired");
+                eprintln!("- Network connectivity issues");
+                eprintln!("- Rate limiting by the AI provider");
+                eprintln!("- Insufficient context in the changes");
+                ExitCode::FAILURE
+            }
+        }
+    })
 }

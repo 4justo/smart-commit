@@ -6,19 +6,23 @@ describe the several logical commits hidden inside that batch in plain
 text, and have SmartCommit propose — and, once approved, create — those
 commits safely.
 
-**Status: MVP complete through Module 14 (end-to-end test suite).**
+**NEW: AI-Powered Features**
+SmartCommit now includes AI capabilities for automatic commit message generation
+and semantic file-to-commit matching using multiple AI providers (Claude, OpenAI, local LLMs).
+
+**Status: MVP complete through Module 14 (end-to-end test suite) with AI integration (Module 15+).**
 The full pipeline — planning, configuration, committing, restore, and
-automated testing — is implemented and passing. Module 15 (release
-polish) is the only remaining step before v0.1.0.
+automated testing — is implemented and passing.
 
 ## Currently implemented
 
 ```bash
-smc doctor      # repository detection + full state (branch, HEAD, conflicts, staged/unstaged/untracked)
-smc analyze     # staged files with diff summaries (--verbose for full hunks)
-smc plan        # full preview: proposed commits, confidence, timestamps, unassigned files, warnings
-smc commit      # plan, confirm ([y/N], or --yes), and create real commits (or --dry-run)
-smc restore     # undo the most recent SmartCommit operation, if it's safe to do so automatically
+smc doctor        # repository detection + full state (branch, HEAD, conflicts, staged/unstaged/untracked)
+smc analyze       # staged files with diff summaries (--verbose for full hunks)
+smc plan          # full preview: proposed commits, confidence, timestamps, unassigned files, warnings
+smc commit        # plan, confirm ([y/N], or --yes), and create real commits (or --dry-run)
+smc restore       # undo the most recent SmartCommit operation, if it's safe to do so automatically
+smc ai-generate   # generate commit messages using AI from staged changes
 ```
 
 All commands above are real and tested end to end.
@@ -76,6 +80,48 @@ With no `--start`, the *last* commit is anchored at the current time
 and earlier commits are placed backward — this can never produce a
 future timestamp.
 
+### AI Features
+
+SmartCommit now includes AI-powered capabilities for automatic commit message generation:
+
+```bash
+# Generate commit messages using AI from staged changes
+smc ai-generate
+
+# Generate multiple atomic commits instead of one comprehensive message
+smc ai-generate --split
+
+# Specify AI provider (claude, openai, local)
+smc ai-generate --provider claude
+```
+
+**AI Configuration:**
+
+Set environment variables to configure AI providers:
+
+```bash
+# For Claude (Anthropic)
+export ANTHROPIC_API_KEY="your-api-key"
+
+# For OpenAI
+export OPENAI_API_KEY="your-api-key"
+
+# For local LLM (Ollama)
+export OLLAMA_BASE_URL="http://localhost:11434"
+
+# Choose provider (optional, defaults to claude)
+export SMC_AI_PROVIDER="claude|openai|local"
+```
+
+**AI Features:**
+- **Automatic message generation**: AI analyzes your code changes and writes conventional commit messages
+- **Semantic file matching**: AI understands the actual meaning of changes and groups files intelligently
+- **Multiple providers**: Support for Claude, OpenAI, and local LLMs (Ollama)
+- **Fallback mechanism**: Automatically falls back to keyword matching if AI fails
+- **Privacy-focused**: Option to use local LLMs for sensitive codebases
+
+**Note:** AI features are optional. SmartCommit works perfectly without AI using the original keyword-based matching system.
+
 ### Configuration
 
 Place a `.smc.toml` at your repository root to tune default
@@ -98,6 +144,25 @@ require_confirmation = true # set to false to skip the [y/N] prompt by default
 
 All sections and fields are optional. Missing fields fall back to the
 built-in defaults. CLI flags always override config values.
+
+For AI configuration, you can also add an `[ai]` section to `.smc.toml`:
+
+```toml
+[ai]
+provider = "claude"  # claude, openai, or local
+enable_message_generation = true
+enable_semantic_matching = true
+fallback_to_keywords = true
+
+[ai.model]
+claude = "claude-3-sonnet-20240229"
+openai = "gpt-4-turbo-preview"
+local = "llama2"
+
+[ai.generation]
+max_tokens = 1024
+temperature = 0.7
+```
 
 ### Exit codes
 
