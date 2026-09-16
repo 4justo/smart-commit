@@ -302,7 +302,7 @@ fn read_staged_index_entries(
     Ok(map)
 }
 
-/// A scoped temporary directory (under `.git/smartcommit/tmp/`, so
+/// A scoped temporary directory (under `.git/smc/tmp/`, so
 /// it's guaranteed to sit inside the repository the caller is
 /// already working in) holding one temp-index file per commit in the
 /// sequence. Cleaned up automatically on drop — including on an
@@ -315,7 +315,7 @@ struct TempIndexArea {
 impl TempIndexArea {
     fn new(git_dir: &Path) -> std::io::Result<Self> {
         let dir = git_dir
-            .join("smartcommit")
+            .join("smc")
             .join("tmp")
             .join(format!("exec-{}", std::process::id()));
         std::fs::create_dir_all(&dir)?;

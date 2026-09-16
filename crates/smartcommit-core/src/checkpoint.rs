@@ -3,7 +3,7 @@
 //! Creates a reliable recovery point before SmartCommit performs any
 //! commit operation. This module never modifies commit history —
 //! the only Git write it performs is creating a new ref under
-//! `refs/smartcommit/backups/`, which:
+//! `refs/smc/backups/`, which:
 //! - never touches an existing branch or HEAD,
 //! - never shows up in `git branch` (confirmed empirically — a ref
 //!   outside `refs/heads/` is invisible to that listing),
@@ -37,7 +37,7 @@ pub struct SafetyCheckpoint {
     pub original_head: String,
     /// `None` if HEAD was detached at checkpoint time.
     pub branch: Option<String>,
-    /// Full ref name, e.g. `refs/smartcommit/backups/20260901T090000Z`.
+    /// Full ref name, e.g. `refs/smc/backups/20260901T090000Z`.
     pub backup_ref: String,
     pub created_at: DateTime<Utc>,
     pub repository_state: RepositoryState,
@@ -151,7 +151,7 @@ pub(crate) fn read_branch(repo_root: &Path) -> Result<Option<String>, Checkpoint
 }
 
 /// Creates a new, previously-nonexistent ref under
-/// `refs/smartcommit/backups/` pointing at `head_oid`, returning its
+/// `refs/smc/backups/` pointing at `head_oid`, returning its
 /// full name.
 ///
 /// Naming collisions (two checkpoints requested with the same `now`,
@@ -175,9 +175,9 @@ fn create_backup_ref(
     const MAX_ATTEMPTS: u32 = 1000;
     for attempt in 0..MAX_ATTEMPTS {
         let candidate = if attempt == 0 {
-            format!("refs/smartcommit/backups/{timestamp}")
+            format!("refs/smc/backups/{timestamp}")
         } else {
-            format!("refs/smartcommit/backups/{timestamp}-{attempt}")
+            format!("refs/smc/backups/{timestamp}-{attempt}")
         };
 
         let output = Command::new("git")
@@ -353,9 +353,9 @@ mod tests {
         let err = create_safety_checkpoint(&dir, fixed_now()).unwrap_err();
         assert!(matches!(err, CheckpointError::NoCommits));
 
-        // No refs/smartcommit ref should have been created.
+        // No refs/smc ref should have been created.
         let refs_output = StdCommand::new("git")
-            .args(["for-each-ref", "refs/smartcommit"])
+            .args(["for-each-ref", "refs/smc"])
             .current_dir(&dir)
             .output()
             .expect("failed to run git for-each-ref");
@@ -417,7 +417,7 @@ mod tests {
 
         let branches = git_output(&dir, &["branch", "--list"]);
         assert!(
-            !branches.contains("smartcommit"),
+            !branches.contains("smc"),
             "backup refs must not clutter normal branch listings, got: {branches}"
         );
 

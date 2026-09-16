@@ -14,11 +14,11 @@ polish) is the only remaining step before v0.1.0.
 ## Currently implemented
 
 ```bash
-smartcommit doctor      # repository detection + full state (branch, HEAD, conflicts, staged/unstaged/untracked)
-smartcommit analyze     # staged files with diff summaries (--verbose for full hunks)
-smartcommit plan        # full preview: proposed commits, confidence, timestamps, unassigned files, warnings
-smartcommit commit      # plan, confirm ([y/N], or --yes), and create real commits (or --dry-run)
-smartcommit restore     # undo the most recent SmartCommit operation, if it's safe to do so automatically
+smc doctor      # repository detection + full state (branch, HEAD, conflicts, staged/unstaged/untracked)
+smc analyze     # staged files with diff summaries (--verbose for full hunks)
+smc plan        # full preview: proposed commits, confidence, timestamps, unassigned files, warnings
+smc commit      # plan, confirm ([y/N], or --yes), and create real commits (or --dry-run)
+smc restore     # undo the most recent SmartCommit operation, if it's safe to do so automatically
 ```
 
 All commands above are real and tested end to end.
@@ -29,22 +29,22 @@ All commands above are real and tested end to end.
 git add .
 
 # preview only — makes no Git modification
-smartcommit plan --messages-file commits.txt
+smc plan --messages-file commits.txt
 
 # review the proposed grouping and timeline, then create the commits
-smartcommit commit --messages-file commits.txt
+smc commit --messages-file commits.txt
 # or skip the confirmation prompt:
-smartcommit commit --messages-file commits.txt --yes
+smc commit --messages-file commits.txt --yes
 # or preview without committing anything:
-smartcommit commit --messages-file commits.txt --dry-run
+smc commit --messages-file commits.txt --dry-run
 ```
 
 If you need to undo it afterward:
 
 ```bash
-smartcommit restore
+smc restore
 # or, non-interactively:
-smartcommit restore --yes
+smc restore --yes
 ```
 
 Restore only proceeds automatically when nothing risky has happened
@@ -78,7 +78,7 @@ future timestamp.
 
 ### Configuration
 
-Place a `.smartcommit.toml` at your repository root to tune default
+Place a `.smc.toml` at your repository root to tune default
 behaviour without passing flags every time:
 
 ```toml
@@ -121,7 +121,7 @@ cargo test --workspace
 smartcommit/
 ├── crates/
 │   ├── smartcommit-core/   # Git engine + planning logic (library)
-│   └── smartcommit-cli/    # CLI binary + integration tests
+│   └── smartcommit-cli/    # CLI binary (installs as `smc`) + integration tests
 │       └── tests/
 │           ├── cli_invocation.rs   # per-module CLI tests (Modules 0–12)
 │           └── end_to_end.rs       # Module 14 full MVP test suite
@@ -134,5 +134,5 @@ smartcommit/
 └── PROJECT_STATE.md        # exact per-module progress
 ```
 
-`smartcommit-core` remains usable without AI or any external LLM,
+The `smartcommit-core` library remains usable without AI or any external LLM,
 and is independent of the CLI.

@@ -1,14 +1,14 @@
 //! Operation record tracking (Module 12, part 1).
 //!
 //! After `execute_commit_plan` runs, SmartCommit records what it
-//! did under `.git/smartcommit/` — this is what `restore` later
+//! did under `.git/smc/` — this is what `restore` later
 //! reads to know what to undo, and it's what would let a future
-//! `smartcommit history` command (not in this MVP) show past
+//! `smc history` command (not in this MVP) show past
 //! operations.
 //!
 //! Storage layout, per `ARCHITECTURE.md` §30:
 //! ```text
-//! .git/smartcommit/
+//! .git/smc/
 //! ├── last-operation.toml   (always the most recent operation)
 //! └── operations/
 //!     └── <id>.toml         (one file per operation, kept for history)
@@ -37,7 +37,7 @@ pub enum OperationStatus {
     Failed,
 }
 
-/// A record of one `smartcommit commit` run: enough to know exactly
+/// A record of one `smc commit` run: enough to know exactly
 /// what changed and how to undo it, without needing to re-derive
 /// anything from the (possibly since-modified) working tree.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -124,15 +124,15 @@ pub fn save_operation_record(
     record: &OperationRecord,
 ) -> Result<(), OperationRecordError> {
     let repo = Repository::discover(repo_path)?;
-    let smartcommit_dir = repo.git_dir.join("smartcommit");
-    let operations_dir = smartcommit_dir.join("operations");
+    let smc_dir = repo.git_dir.join("smc");
+    let operations_dir = smc_dir.join("operations");
     std::fs::create_dir_all(&operations_dir)
         .map_err(|e| OperationRecordError::WriteFailed(e.to_string()))?;
 
     let toml_text = toml::to_string_pretty(record)
         .map_err(|e| OperationRecordError::SerializeFailed(e.to_string()))?;
 
-    std::fs::write(smartcommit_dir.join("last-operation.toml"), &toml_text)
+    std::fs::write(smc_dir.join("last-operation.toml"), &toml_text)
         .map_err(|e| OperationRecordError::WriteFailed(e.to_string()))?;
     std::fs::write(
         operations_dir.join(format!("{}.toml", record.id)),
@@ -151,7 +151,7 @@ pub fn load_last_operation_record(
     repo_path: impl AsRef<Path>,
 ) -> Result<OperationRecord, OperationRecordError> {
     let repo = Repository::discover(repo_path)?;
-    let path = repo.git_dir.join("smartcommit").join("last-operation.toml");
+    let path = repo.git_dir.join("smc").join("last-operation.toml");
 
     if !path.exists() {
         return Err(OperationRecordError::NotFound);
@@ -211,7 +211,7 @@ mod tests {
             original_head: "abc123".to_string(),
             final_head: "def456".to_string(),
             branch: Some("main".to_string()),
-            checkpoint_ref: "refs/smartcommit/backups/20260901T090000Z".to_string(),
+            checkpoint_ref: "refs/smc/backups/20260901T090000Z".to_string(),
             created_commits: vec!["def456".to_string()],
             status: OperationStatus::Completed,
         }
@@ -237,9 +237,9 @@ mod tests {
 
         save_operation_record(&dir, &record).expect("save should succeed");
 
-        assert!(dir.join(".git/smartcommit/last-operation.toml").exists());
+        assert!(dir.join(".git/smc/last-operation.toml").exists());
         assert!(dir
-            .join(".git/smartcommit/operations/20260901T090000Z.toml")
+            .join(".git/smc/operations/20260901T090000Z.toml")
             .exists());
 
         fs::remove_dir_all(&dir).ok();
@@ -255,8 +255,8 @@ mod tests {
         assert_eq!(loaded.id, "second");
 
         // Both history entries must still exist independently.
-        assert!(dir.join(".git/smartcommit/operations/first.toml").exists());
-        assert!(dir.join(".git/smartcommit/operations/second.toml").exists());
+        assert!(dir.join(".git/smc/operations/first.toml").exists());
+        assert!(dir.join(".git/smc/operations/second.toml").exists());
 
         fs::remove_dir_all(&dir).ok();
     }
@@ -275,7 +275,7 @@ mod tests {
         let checkpoint = crate::SafetyCheckpoint {
             original_head: "orig".to_string(),
             branch: Some("main".to_string()),
-            backup_ref: "refs/smartcommit/backups/x".to_string(),
+            backup_ref: "refs/smc/backups/x".to_string(),
             created_at: Utc::now(),
             repository_state: crate::RepositoryState::default(),
             staged_files: vec![],
@@ -301,7 +301,7 @@ mod tests {
         let checkpoint = crate::SafetyCheckpoint {
             original_head: "orig".to_string(),
             branch: Some("main".to_string()),
-            backup_ref: "refs/smartcommit/backups/x".to_string(),
+            backup_ref: "refs/smc/backups/x".to_string(),
             created_at: Utc::now(),
             repository_state: crate::RepositoryState::default(),
             staged_files: vec![],
@@ -330,7 +330,7 @@ mod tests {
         let checkpoint = crate::SafetyCheckpoint {
             original_head: "orig".to_string(),
             branch: Some("main".to_string()),
-            backup_ref: "refs/smartcommit/backups/x".to_string(),
+            backup_ref: "refs/smc/backups/x".to_string(),
             created_at: Utc::now(),
             repository_state: crate::RepositoryState::default(),
             staged_files: vec![],
