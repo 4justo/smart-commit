@@ -17,13 +17,13 @@ fn cargo_bin_path() -> std::path::PathBuf {
     // `cargo test` builds the binary into the workspace target dir
     // before running integration tests; CARGO_BIN_EXE_<name> is set
     // by Cargo for exactly this purpose.
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_smartcommit"))
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_smc"))
 }
 
 fn temp_messages_file(contents: &str, label: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::SeqCst);
     let path = std::env::temp_dir().join(format!(
-        "smartcommit-cli-{label}-{}-{n}.txt",
+        "smc-cli-{label}-{}-{n}.txt",
         std::process::id()
     ));
     fs::write(&path, contents).expect("failed to write temporary messages file");
@@ -33,7 +33,7 @@ fn temp_messages_file(contents: &str, label: &str) -> PathBuf {
 fn temp_dir(label: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::SeqCst);
     let dir = std::env::temp_dir().join(format!(
-        "smartcommit-cli-repo-{label}-{}-{n}",
+        "smc-cli-repo-{label}-{}-{n}",
         std::process::id()
     ));
     fs::create_dir_all(&dir).expect("failed to create temp repo dir");
@@ -95,15 +95,15 @@ fn version_flag_prints_version_and_exits_zero() {
     let output = Command::new(cargo_bin_path())
         .arg("--version")
         .output()
-        .expect("failed to run smartcommit binary");
+        .expect("failed to run smc binary");
 
     assert!(
         output.status.success(),
-        "smartcommit --version should exit 0"
+        "smc --version should exit 0"
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("smartcommit"),
+        stdout.contains("smc"),
         "expected version output to mention the binary name, got: {stdout:?}"
     );
 }
@@ -113,9 +113,9 @@ fn help_flag_prints_help_and_exits_zero() {
     let output = Command::new(cargo_bin_path())
         .arg("--help")
         .output()
-        .expect("failed to run smartcommit binary");
+        .expect("failed to run smc binary");
 
-    assert!(output.status.success(), "smartcommit --help should exit 0");
+    assert!(output.status.success(), "smc --help should exit 0");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.to_lowercase().contains("usage"),
@@ -137,12 +137,12 @@ fn plan_builds_a_commit_plan_from_staged_changes() {
         .args(["plan", "--messages-file"])
         .arg(&messages_file)
         .output()
-        .expect("failed to run smartcommit binary");
+        .expect("failed to run smc binary");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         output.status.success(),
-        "smartcommit plan should exit 0, stdout: {stdout}"
+        "smc plan should exit 0, stdout: {stdout}"
     );
 
     assert!(stdout.contains("SMARTCOMMIT PLAN"), "stdout: {stdout}");
@@ -186,11 +186,11 @@ fn plan_reports_no_staged_changes() {
         .args(["plan", "--messages-file"])
         .arg(&messages_file)
         .output()
-        .expect("failed to run smartcommit binary");
+        .expect("failed to run smc binary");
 
     assert!(
         !output.status.success(),
-        "smartcommit plan should fail with nothing staged"
+        "smc plan should fail with nothing staged"
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -225,9 +225,9 @@ fn plan_rejects_empty_messages_file() {
         .args(["plan", "--messages-file"])
         .arg(&messages_file)
         .output()
-        .expect("failed to run smartcommit binary");
+        .expect("failed to run smc binary");
 
-    assert!(!output.status.success(), "smartcommit plan should fail");
+    assert!(!output.status.success(), "smc plan should fail");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("message input is empty"),
@@ -269,11 +269,11 @@ fn plan_refuses_when_repository_is_blocked_by_a_merge_conflict() {
         .args(["plan", "--messages-file"])
         .arg(&messages_file)
         .output()
-        .expect("failed to run smartcommit binary");
+        .expect("failed to run smc binary");
 
     assert!(
         !output.status.success(),
-        "smartcommit plan should refuse on a blocked repo"
+        "smc plan should refuse on a blocked repo"
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -302,7 +302,7 @@ fn commit_dry_run_makes_no_git_modification() {
         .arg(&messages_file)
         .arg("--dry-run")
         .output()
-        .expect("failed to run smartcommit binary");
+        .expect("failed to run smc binary");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -341,12 +341,12 @@ fn commit_with_yes_creates_real_commits() {
         .arg(&messages_file)
         .arg("--yes")
         .output()
-        .expect("failed to run smartcommit binary");
+        .expect("failed to run smc binary");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         output.status.success(),
-        "smartcommit commit --yes should exit 0, stdout: {stdout}"
+        "smc commit --yes should exit 0, stdout: {stdout}"
     );
     assert!(
         stdout.contains("All commits created successfully."),
@@ -385,7 +385,7 @@ fn commit_without_yes_defaults_to_no_on_empty_input() {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .expect("failed to spawn smartcommit binary");
+        .expect("failed to spawn smc binary");
 
     // Pressing Enter with no input — "default must be No".
     child
@@ -431,7 +431,7 @@ fn restore_reverts_a_successful_commit_and_restages_its_files() {
         .arg(&messages_file)
         .arg("--yes")
         .output()
-        .expect("failed to run smartcommit commit");
+        .expect("failed to run smc commit");
     assert!(commit_output.status.success());
 
     let restore_output = Command::new(cargo_bin_path())
@@ -439,7 +439,7 @@ fn restore_reverts_a_successful_commit_and_restages_its_files() {
         .arg(&repo)
         .args(["restore", "--yes"])
         .output()
-        .expect("failed to run smartcommit restore");
+        .expect("failed to run smc restore");
 
     let stdout = String::from_utf8_lossy(&restore_output.stdout);
     assert!(restore_output.status.success(), "stdout: {stdout}");
@@ -491,7 +491,7 @@ fn restore_refuses_when_a_later_commit_exists() {
         .arg(&messages_file)
         .arg("--yes")
         .output()
-        .expect("failed to run smartcommit commit");
+        .expect("failed to run smc commit");
     assert!(commit_output.status.success());
 
     let head_before_restore_attempt = git_output(&repo, &["rev-parse", "HEAD"]);
@@ -508,7 +508,7 @@ fn restore_refuses_when_a_later_commit_exists() {
         .arg(&repo)
         .args(["restore", "--yes"])
         .output()
-        .expect("failed to run smartcommit restore");
+        .expect("failed to run smc restore");
 
     let stdout = String::from_utf8_lossy(&restore_output.stdout);
     assert!(!restore_output.status.success(), "stdout: {stdout}");
@@ -537,7 +537,7 @@ fn restore_reports_no_operation_when_none_exists() {
         .arg(&dir)
         .args(["restore", "--yes"])
         .output()
-        .expect("failed to run smartcommit restore");
+        .expect("failed to run smc restore");
 
     assert!(!output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);

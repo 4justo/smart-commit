@@ -37,9 +37,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// Path to the built `smartcommit` binary.
+/// Path to the built `smc` binary.
 fn bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_smartcommit"))
+    PathBuf::from(env!("CARGO_BIN_EXE_smc"))
 }
 
 /// Creates a unique temporary directory for one test.
@@ -106,18 +106,18 @@ fn messages_file(content: &str, label: &str) -> PathBuf {
     path
 }
 
-/// Runs `smartcommit --repo <dir> <args...>` and returns its output.
-fn smartcommit(dir: &Path, args: &[&str]) -> std::process::Output {
+/// Runs `smc --repo <dir> <args...>` and returns its output.
+fn smc(dir: &Path, args: &[&str]) -> std::process::Output {
     Command::new(bin())
         .arg("--repo")
         .arg(dir)
         .args(args)
         .output()
-        .expect("failed to run smartcommit")
+        .expect("failed to run smc")
 }
 
-/// Runs `smartcommit --repo <dir> <args...>`, piping `stdin_bytes` to stdin.
-fn smartcommit_with_stdin(dir: &Path, args: &[&str], stdin_bytes: &[u8]) -> std::process::Output {
+/// Runs `smc --repo <dir> <args...>`, piping `stdin_bytes` to stdin.
+fn smc_with_stdin(dir: &Path, args: &[&str], stdin_bytes: &[u8]) -> std::process::Output {
     let mut child = Command::new(bin())
         .arg("--repo")
         .arg(dir)
@@ -126,7 +126,7 @@ fn smartcommit_with_stdin(dir: &Path, args: &[&str], stdin_bytes: &[u8]) -> std:
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .expect("failed to spawn smartcommit");
+        .expect("failed to spawn smc");
 
     child
         .stdin
@@ -168,7 +168,7 @@ fn s01_main_scenario_three_files_three_commits() {
         "s01",
     );
 
-    let out = smartcommit(
+    let out = smc(
         &repo,
         &["commit", "--messages-file", mf.to_str().unwrap(), "--yes"],
     );
@@ -226,7 +226,7 @@ fn s02_no_repository() {
     let not_a_repo = temp_dir("s02");
     let mf = messages_file("Fix something\n", "s02");
 
-    let out = smartcommit(
+    let out = smc(
         &not_a_repo,
         &["plan", "--messages-file", mf.to_str().unwrap()],
     );
@@ -255,7 +255,7 @@ fn s03_no_staged_changes() {
     // Nothing new staged after the initial commit.
     let mf = messages_file("Fix something\n", "s03");
 
-    let out = smartcommit(
+    let out = smc(
         &repo,
         &["commit", "--messages-file", mf.to_str().unwrap(), "--yes"],
     );
@@ -283,7 +283,7 @@ fn s04_one_message_one_commit() {
 
     let mf = messages_file("Fix authentication\n", "s04");
 
-    let out = smartcommit(
+    let out = smc(
         &repo,
         &["commit", "--messages-file", mf.to_str().unwrap(), "--yes"],
     );
@@ -312,7 +312,7 @@ fn s05_multiple_messages_produce_multiple_commits() {
         "s05",
     );
 
-    let out = smartcommit(
+    let out = smc(
         &repo,
         &["commit", "--messages-file", mf.to_str().unwrap(), "--yes"],
     );
@@ -346,7 +346,7 @@ fn s06_ambiguous_file_is_left_unassigned() {
         "s06",
     );
 
-    let plan_out = smartcommit(&repo, &["plan", "--messages-file", mf.to_str().unwrap()]);
+    let plan_out = smc(&repo, &["plan", "--messages-file", mf.to_str().unwrap()]);
     let plan_stdout = String::from_utf8_lossy(&plan_out.stdout);
     assert!(plan_out.status.success(), "s06 plan stdout: {plan_stdout}");
     assert!(
@@ -359,7 +359,7 @@ fn s06_ambiguous_file_is_left_unassigned() {
     );
 
     // Run commit and verify utils.rs was never committed.
-    let commit_out = smartcommit(
+    let commit_out = smc(
         &repo,
         &["commit", "--messages-file", mf.to_str().unwrap(), "--yes"],
     );
@@ -390,7 +390,7 @@ fn s07_unassigned_file_remains_staged_and_not_committed() {
 
     let mf = messages_file("Fix authentication\n", "s07");
 
-    let out = smartcommit(
+    let out = smc(
         &repo,
         &["commit", "--messages-file", mf.to_str().unwrap(), "--yes"],
     );
@@ -433,7 +433,7 @@ fn s08_added_file_is_committed_correctly() {
 
     let mf = messages_file("Add payment validation\n", "s08");
 
-    let out = smartcommit(
+    let out = smc(
         &repo,
         &["commit", "--messages-file", mf.to_str().unwrap(), "--yes"],
     );
@@ -468,7 +468,7 @@ fn s09_deleted_file_is_committed_correctly() {
 
     let mf = messages_file("Remove legacy module\n", "s09");
 
-    let out = smartcommit(
+    let out = smc(
         &repo,
         &["commit", "--messages-file", mf.to_str().unwrap(), "--yes"],
     );
@@ -489,7 +489,7 @@ fn s09_deleted_file_is_committed_correctly() {
 // ── Scenario 10 — Unstaged changes preserved ─────────────────────────────────
 
 /// Unstaged changes — including one stacked on a staged file — must survive
-/// the entire `smartcommit commit` operation completely untouched.
+/// the entire `smc commit` operation completely untouched.
 #[test]
 fn s10_unstaged_changes_are_preserved_end_to_end() {
     let repo = init_repo("s10");
@@ -517,7 +517,7 @@ fn s10_unstaged_changes_are_preserved_end_to_end() {
 
     let mf = messages_file("Fix authentication\n", "s10");
 
-    let out = smartcommit(
+    let out = smc(
         &repo,
         &["commit", "--messages-file", mf.to_str().unwrap(), "--yes"],
     );
@@ -562,7 +562,7 @@ fn s11_timeline_timestamps_are_applied_to_commits() {
         "s11",
     );
 
-    let out = smartcommit(
+    let out = smc(
         &repo,
         &[
             "commit",
@@ -620,7 +620,7 @@ fn s12_dry_run_makes_no_git_modification() {
         "s12",
     );
 
-    let out = smartcommit(
+    let out = smc(
         &repo,
         &[
             "commit",
@@ -666,7 +666,7 @@ fn s13_user_cancellation_exits_with_code_2() {
 
     let mf = messages_file("Fix authentication\n", "s13");
 
-    let out = smartcommit_with_stdin(
+    let out = smc_with_stdin(
         &repo,
         &["commit", "--messages-file", mf.to_str().unwrap()],
         b"\n",
@@ -692,7 +692,7 @@ fn s13_user_cancellation_exits_with_code_2() {
 
 // ── Scenario 14 — Recovery checkpoint ────────────────────────────────────────
 
-/// A safety checkpoint ref under `refs/smartcommit/backups/` must be created
+/// A safety checkpoint ref under `refs/smc/backups/` must be created
 /// before any commit, pointing to the original HEAD, and must not appear in
 /// `git branch`.
 #[test]
@@ -706,17 +706,17 @@ fn s14_recovery_checkpoint_is_created_before_commits() {
 
     let mf = messages_file("Fix authentication\n", "s14");
 
-    let out = smartcommit(
+    let out = smc(
         &repo,
         &["commit", "--messages-file", mf.to_str().unwrap(), "--yes"],
     );
     assert!(out.status.success());
 
     // At least one backup ref must exist.
-    let refs = git_output(&repo, &["for-each-ref", "refs/smartcommit/backups/"]);
+    let refs = git_output(&repo, &["for-each-ref", "refs/smc/backups/"]);
     assert!(
         !refs.is_empty(),
-        "s14: expected backup ref under refs/smartcommit/backups/"
+        "s14: expected backup ref under refs/smc/backups/"
     );
 
     // It must resolve to the original HEAD.
@@ -736,7 +736,7 @@ fn s14_recovery_checkpoint_is_created_before_commits() {
     // Must not appear in normal branch listing.
     let branches = git_output(&repo, &["branch", "--list"]);
     assert!(
-        !branches.contains("smartcommit"),
+        !branches.contains("smc"),
         "s14: backup ref must not appear in git branch, branches: {branches}"
     );
 
@@ -762,7 +762,7 @@ fn s15_restore_reverts_operation_and_restages_files() {
         "s15",
     );
 
-    let commit_out = smartcommit(
+    let commit_out = smc(
         &repo,
         &["commit", "--messages-file", mf.to_str().unwrap(), "--yes"],
     );
@@ -776,7 +776,7 @@ fn s15_restore_reverts_operation_and_restages_files() {
         3
     );
 
-    let restore_out = smartcommit(&repo, &["restore", "--yes"]);
+    let restore_out = smc(&repo, &["restore", "--yes"]);
     let restore_stdout = String::from_utf8_lossy(&restore_out.stdout);
     assert!(
         restore_out.status.success(),
@@ -827,7 +827,7 @@ fn s16_binary_file_does_not_crash_the_tool() {
     let mf = messages_file("Fix authentication\n", "s16");
 
     // plan must not panic.
-    let plan_out = smartcommit(&repo, &["plan", "--messages-file", mf.to_str().unwrap()]);
+    let plan_out = smc(&repo, &["plan", "--messages-file", mf.to_str().unwrap()]);
     let plan_stderr = String::from_utf8_lossy(&plan_out.stderr);
     assert!(
         !plan_stderr.contains("thread 'main' panicked"),
@@ -840,7 +840,7 @@ fn s16_binary_file_does_not_crash_the_tool() {
     );
 
     // commit must not panic.
-    let commit_out = smartcommit(
+    let commit_out = smc(
         &repo,
         &["commit", "--messages-file", mf.to_str().unwrap(), "--yes"],
     );
@@ -855,7 +855,7 @@ fn s16_binary_file_does_not_crash_the_tool() {
 
 // ── Scenario 17 — Invalid config ─────────────────────────────────────────────
 
-/// An invalid `.smartcommit.toml` must be caught before any Git work.
+/// An invalid `.smc.toml` must be caught before any Git work.
 /// No commits may be created. No panic is acceptable.
 #[test]
 fn s17_invalid_config_is_rejected_before_any_git_work() {
@@ -869,11 +869,11 @@ fn s17_invalid_config_is_rejected_before_any_git_work() {
 
     // Case A — syntactically broken TOML.
     write_file(
-        &repo.join(".smartcommit.toml"),
+        &repo.join(".smc.toml"),
         "[matching\nminimum_confidence = 0.70\n",
     );
 
-    let out_a = smartcommit(
+    let out_a = smc(
         &repo,
         &["commit", "--messages-file", mf.to_str().unwrap(), "--yes"],
     );
@@ -895,11 +895,11 @@ fn s17_invalid_config_is_rejected_before_any_git_work() {
 
     // Case B — valid TOML but out-of-range value.
     write_file(
-        &repo.join(".smartcommit.toml"),
+        &repo.join(".smc.toml"),
         "[matching]\nminimum_confidence = 1.5\n",
     );
 
-    let out_b = smartcommit(
+    let out_b = smc(
         &repo,
         &["commit", "--messages-file", mf.to_str().unwrap(), "--yes"],
     );

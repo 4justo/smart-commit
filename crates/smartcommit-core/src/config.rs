@@ -1,6 +1,6 @@
 //! Configuration loading for SmartCommit (Module 13).
 //!
-//! SmartCommit can optionally be configured with a `.smartcommit.toml` file
+//! SmartCommit can optionally be configured with a `.smc.toml` file
 //! placed at the root of your Git repository. Every field is optional — if the
 //! file doesn't exist, or a field is omitted, the built-in default is used.
 //!
@@ -8,12 +8,12 @@
 //!
 //! 1. **CLI flag** — always wins. A flag the user typed on the command line
 //!    overrides everything.
-//! 2. **`.smartcommit.toml`** — values from the project config file override
+//! 2. **`.smc.toml`** — values from the project config file override
 //!    the built-in defaults when no CLI flag was given.
 //! 3. **Built-in default** — used when neither a CLI flag nor a config value
 //!    was provided.
 //!
-//! # Example `.smartcommit.toml`
+//! # Example `.smc.toml`
 //!
 //! ```toml
 //! [matching]
@@ -36,7 +36,7 @@ use thiserror::Error;
 
 // ── Error type ────────────────────────────────────────────────────────────────
 
-/// Errors that can occur while loading or validating `.smartcommit.toml`.
+/// Errors that can occur while loading or validating `.smc.toml`.
 ///
 /// All variants produce a human-readable message suitable for printing
 /// directly to the user. The file is only read and validated once per
@@ -44,16 +44,16 @@ use thiserror::Error;
 /// work begins.
 #[derive(Debug, Error)]
 pub enum ConfigError {
-    /// The `.smartcommit.toml` file exists but could not be read from
+    /// The `.smc.toml` file exists but could not be read from
     /// disk (e.g. a permissions problem). The inner error contains the
     /// OS-level reason.
-    #[error("Could not read .smartcommit.toml: {0}")]
+    #[error("Could not read .smc.toml: {0}")]
     Io(#[from] std::io::Error),
 
     /// The file was read successfully but is not valid TOML, or contains
     /// keys that do not match the expected structure. The inner string
     /// contains the parser's error message.
-    #[error("Could not parse .smartcommit.toml: {0}")]
+    #[error("Could not parse .smc.toml: {0}")]
     Parse(String),
 
     /// The TOML parsed correctly but a value is out of its allowed range
@@ -101,7 +101,7 @@ struct RawCommitConfig {
 /// The fully resolved SmartCommit configuration.
 ///
 /// Produced by [`load_config`]. Every field is guaranteed to hold a valid,
-/// in-range value — either from the project's `.smartcommit.toml` or from
+/// in-range value — either from the project's `.smc.toml` or from
 /// the built-in defaults. The CLI layer reads this once after repository
 /// discovery and uses it to supply defaults wherever no explicit flag was
 /// given by the user.
@@ -185,10 +185,10 @@ pub struct TimelineConfig {
     pub random_max_minutes: Option<u64>,
 }
 
-/// Behaviour of the interactive confirmation prompt in `smartcommit commit`.
+/// Behaviour of the interactive confirmation prompt in `smc commit`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommitConfig {
-    /// When `true` (the default), `smartcommit commit` asks for explicit
+    /// When `true` (the default), `smc commit` asks for explicit
     /// confirmation before creating any commits. Set to `false` to make
     /// non-interactive execution the default (equivalent to always passing
     /// `--yes`). The `--yes` CLI flag still overrides this when it is
@@ -240,7 +240,7 @@ impl Default for CommitConfig {
 /// Loads the SmartCommit configuration for the repository rooted at
 /// `repo_root`.
 ///
-/// Looks for `<repo_root>/.smartcommit.toml`. If the file does not exist,
+/// Looks for `<repo_root>/.smc.toml`. If the file does not exist,
 /// [`SmartCommitConfig::default`] is returned silently — the absence of a
 /// config file is not an error. If the file exists but cannot be read,
 /// parsed, or passes validation, a [`ConfigError`] is returned.
@@ -259,7 +259,7 @@ impl Default for CommitConfig {
 ///   structure.
 /// - [`ConfigError::Validation`] — a value is out of its allowed range.
 pub fn load_config(repo_root: &Path) -> Result<SmartCommitConfig, ConfigError> {
-    let config_path = repo_root.join(".smartcommit.toml");
+    let config_path = repo_root.join(".smc.toml");
 
     // A missing file is not an error — just use defaults.
     if !config_path.exists() {
@@ -391,15 +391,15 @@ mod tests {
     }
 
     fn write_config(dir: &Path, content: &str) {
-        fs::write(dir.join(".smartcommit.toml"), content)
-            .expect("failed to write .smartcommit.toml in temp dir");
+        fs::write(dir.join(".smc.toml"), content)
+            .expect("failed to write .smc.toml in temp dir");
     }
 
     // ── Happy-path tests ──────────────────────────────────────────────────────
 
     #[test]
     fn returns_defaults_when_no_file_exists() {
-        // The absence of .smartcommit.toml must never be an error.
+        // The absence of .smc.toml must never be an error.
         let dir = temp_dir();
         let config = load_config(&dir).unwrap();
         assert_eq!(config, SmartCommitConfig::default());
@@ -446,7 +446,7 @@ require_confirmation = false
 
     #[test]
     fn empty_file_is_equivalent_to_no_file() {
-        // An empty .smartcommit.toml is valid TOML and must return defaults.
+        // An empty .smc.toml is valid TOML and must return defaults.
         let dir = temp_dir();
         write_config(&dir, "");
 

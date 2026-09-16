@@ -29,7 +29,7 @@ use std::process::ExitCode;
 /// SmartCommit — a professional Git commit-planning and splitting
 /// tool.
 #[derive(Parser, Debug)]
-#[command(name = "smartcommit", version, about, long_about = None)]
+#[command(name = "smc", version, about, long_about = None)]
 #[command(arg_required_else_help = true)]
 struct Cli {
     /// Path to operate on. Defaults to the current directory.
@@ -387,7 +387,7 @@ fn build_preview(
             eprintln!("- there are unresolved conflicts");
         }
         eprintln!();
-        eprintln!("Resolve this before using smartcommit.");
+        eprintln!("Resolve this before using smc.");
         return Err(ExitCode::FAILURE);
     }
 
@@ -627,7 +627,7 @@ fn run_commit(
     };
 
     // Recorded regardless of full success or partial failure — this
-    // is what `smartcommit restore` reads later. If saving the
+    // is what `smc restore` reads later. If saving the
     // record itself fails, that's surfaced as a warning, not a
     // reason to treat the commits (which already exist for real) as
     // failed — restore just won't have anything to act on for this
@@ -635,7 +635,7 @@ fn run_commit(
     // recovery path either way.
     let record = OperationRecord::from_execution(&checkpoint, &report, now_utc);
     if let Err(e) = save_operation_record(&preview.repo_root, &record) {
-        eprintln!("Warning: could not save operation record ({e}); `smartcommit restore` will not see this operation.");
+        eprintln!("Warning: could not save operation record ({e}); `smc restore` will not see this operation.");
     }
 
     render_execution_report(&report);
