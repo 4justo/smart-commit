@@ -884,8 +884,8 @@ fn s17_invalid_config_is_rejected_before_any_git_work() {
         "s17a: panicked, stderr: {stderr_a}"
     );
     assert!(
-        stderr_a.contains("smartcommit.toml"),
-        "s17a: error must mention .smartcommit.toml, stderr: {stderr_a}"
+        stderr_a.contains("smc.toml"),
+        "s17a: error must mention .smc.toml, stderr: {stderr_a}"
     );
     assert_eq!(
         git_output(&repo, &["rev-parse", "HEAD"]),

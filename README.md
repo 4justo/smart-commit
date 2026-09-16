@@ -22,12 +22,31 @@ smc analyze       # staged files with diff summaries (--verbose for full hunks)
 smc plan          # full preview: proposed commits, confidence, timestamps, unassigned files, warnings
 smc commit        # plan, confirm ([y/N], or --yes), and create real commits (or --dry-run)
 smc restore       # undo the most recent SmartCommit operation, if it's safe to do so automatically
-smc ai-generate   # generate commit messages using AI from staged changes
 ```
 
 All commands above are real and tested end to end.
 
 ## Workflow
+
+### Automatic AI-generated commit messages (Git-like workflow)
+
+```bash
+git add .
+
+# Preview with automatic AI message generation
+smc plan
+
+# Review the proposed grouping and timeline, then create the commits
+smc commit
+# or skip the confirmation prompt:
+smc commit --yes
+# or preview without committing anything:
+smc commit --dry-run
+```
+
+When you omit `--messages-file`, SmartCommit automatically generates commit messages using AI from your staged changes.
+
+### Manual commit messages (explicit control)
 
 ```bash
 git add .
@@ -82,17 +101,12 @@ future timestamp.
 
 ### AI Features
 
-SmartCommit now includes AI-powered capabilities for automatic commit message generation:
+SmartCommit automatically generates commit messages using AI when you omit `--messages-file`:
 
 ```bash
-# Generate commit messages using AI from staged changes
-smc ai-generate
-
-# Generate multiple atomic commits instead of one comprehensive message
-smc ai-generate --split
-
-# Specify AI provider (claude, openai, local)
-smc ai-generate --provider claude
+# Automatic AI generation (Git-like workflow)
+smc plan
+smc commit
 ```
 
 **AI Configuration:**
@@ -120,7 +134,7 @@ export SMC_AI_PROVIDER="claude|openai|local"
 - **Fallback mechanism**: Automatically falls back to keyword matching if AI fails
 - **Privacy-focused**: Option to use local LLMs for sensitive codebases
 
-**Note:** AI features are optional. SmartCommit works perfectly without AI using the original keyword-based matching system.
+**Note:** AI features are optional. SmartCommit works perfectly without AI using the original keyword-based matching system, or you can provide explicit commit messages with `--messages-file`.
 
 ### Configuration
 

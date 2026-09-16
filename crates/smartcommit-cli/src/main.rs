@@ -13,7 +13,7 @@
 
 use clap::{Args, Parser, Subcommand};
 use smartcommit_core::{
-    ai::{create_provider_with_fallback, generate_commit_messages, load_ai_config_from_env, validate_ai_config, ProviderType},
+    ai::{create_provider_with_fallback, generate_commit_messages, load_ai_config_from_env, validate_ai_config},
     build_commit_plan, create_safety_checkpoint, execute_commit_plan, execute_restore,
     get_staged_changes, get_staged_diffs, inspect_repository_state, load_config,
     manual_recovery_instructions, match_files_to_messages, plan_restore, save_operation_record,
@@ -25,7 +25,7 @@ use smartcommit_core::{
 use tokio::runtime::Runtime;
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 /// SmartCommit — a professional Git commit-planning and splitting
@@ -60,20 +60,21 @@ enum Commands {
     },
     /// Preview a commit plan from a messages file and the currently
     /// staged changes. Read-only — makes no Git modification.
+    /// If no messages file is provided, AI will automatically generate commit messages.
     Plan {
-        /// Path to a text file containing commit messages.
+        /// Path to a text file containing commit messages. If omitted, AI generates messages.
         #[arg(long, value_name = "FILE")]
-        messages_file: PathBuf,
+        messages_file: Option<PathBuf>,
 
         #[command(flatten)]
         timeline: TimelineArgs,
     },
     /// Build a commit plan and, after confirmation, create the
-    /// commits for real.
+    /// commits for real. If no messages file is provided, AI will automatically generate commit messages.
     Commit {
-        /// Path to a text file containing commit messages.
+        /// Path to a text file containing commit messages. If omitted, AI generates messages.
         #[arg(long, value_name = "FILE")]
-        messages_file: PathBuf,
+        messages_file: Option<PathBuf>,
 
         #[command(flatten)]
         timeline: TimelineArgs,
@@ -96,20 +97,6 @@ enum Commands {
         #[arg(long)]
         yes: bool,
     },
-    /// Generate commit messages using AI from staged changes.
-    AiGenerate {
-        /// Use AI for semantic file matching instead of keyword matching.
-        #[arg(long)]
-        semantic: bool,
-        
-        /// Generate multiple atomic commits instead of one comprehensive message.
-        #[arg(long)]
-        split: bool,
-        
-        /// Specify AI provider (claude, openai, local).
-        #[arg(long)]
-        provider: Option<String>,
-    },
 }
 
 /// Timeline options shared by `plan` and `commit`, so the preview
@@ -129,7 +116,7 @@ struct TimelineArgs {
 
     /// Fixed interval, in minutes, between consecutive commits.
     /// Ignored if --random-min-minutes/--random-max-minutes are
-    /// given. When omitted, the value from `.smartcommit.toml`
+    /// given. When omitted, the value from `.smc.toml`
     /// (or the built-in default of 10) is used instead.
     #[arg(long, value_name = "MINUTES")]
     interval_minutes: Option<i64>,
@@ -234,9 +221,6 @@ fn main() -> ExitCode {
             dry_run,
         } => run_commit(cli.repo, messages_file, timeline, yes, dry_run),
         Commands::Restore { yes } => run_restore(cli.repo, yes),
-        Commands::AiGenerate { semantic, split, provider } => {
-            run_ai_generate(cli.repo, semantic, split, provider)
-        }
     }
 }
 
@@ -356,12 +340,12 @@ struct Preview {
 /// per §36's requirement that "the same planning code should be used
 /// for dry-run and real execution."
 ///
-/// Configuration (Module 13) is loaded from `.smartcommit.toml` at
+/// Configuration (Module 13) is loaded from `.smc.toml` at
 /// the repository root immediately after repository discovery. CLI
 /// flags always take precedence over config values.
 fn build_preview(
     repo_path: Option<PathBuf>,
-    messages_file: &Path,
+    messages_file: &Option<PathBuf>,
     timeline: &TimelineArgs,
     now: DateTime<FixedOffset>,
 ) -> Result<Preview, ExitCode> {
@@ -376,13 +360,13 @@ fn build_preview(
     let config = load_config(&repo.root).map_err(|e| {
         match &e {
             ConfigError::Io(io_err) => {
-                eprintln!("Could not read .smartcommit.toml: {io_err}");
+                eprintln!("Could not read .smc.toml: {io_err}");
             }
             ConfigError::Parse(msg) => {
-                eprintln!("Could not parse .smartcommit.toml: {msg}");
+                eprintln!("Could not parse .smc.toml: {msg}");
             }
             ConfigError::Validation(msg) => {
-                eprintln!("Invalid .smartcommit.toml: {msg}");
+                eprintln!("Invalid .smc.toml: {msg}");
             }
         }
         ExitCode::FAILURE
@@ -433,21 +417,65 @@ fn build_preview(
         }
     };
 
-    let text = fs::read_to_string(messages_file).map_err(|err| {
-        eprintln!(
-            "Could not read messages file {}: {err}",
-            messages_file.display()
-        );
-        ExitCode::FAILURE
-    })?;
-    let messages = text.parse::<CommitMessages>().map_err(|err| {
-        let ParseCommitMessagesError::EmptyInput = err;
-        eprintln!(
-            "Could not parse commit messages from {}: message input is empty",
-            messages_file.display()
-        );
-        ExitCode::FAILURE
-    })?;
+    // Get commit messages - either from file or AI generation
+    let messages = match messages_file {
+        Some(file) => {
+            let text = fs::read_to_string(file).map_err(|err| {
+                eprintln!(
+                    "Could not read messages file {}: {err}",
+                    file.display()
+                );
+                ExitCode::FAILURE
+            })?;
+            text.parse::<CommitMessages>().map_err(|err| {
+                let ParseCommitMessagesError::EmptyInput = err;
+                eprintln!(
+                    "Could not parse commit messages from {}: message input is empty",
+                    file.display()
+                );
+                ExitCode::FAILURE
+            })?
+        }
+        None => {
+            // Auto-generate messages using AI
+            let ai_config = load_ai_config_from_env();
+            
+            // Validate AI configuration
+            if let Err(e) = validate_ai_config(&ai_config) {
+                eprintln!("AI configuration error: {e}");
+                eprintln!("Please set the required environment variables for your chosen provider.");
+                eprintln!("Supported providers: claude (ANTHROPIC_API_KEY), openai (OPENAI_API_KEY), local (OLLAMA_BASE_URL)");
+                return Err(ExitCode::FAILURE);
+            }
+            
+            // Create provider with fallback
+            let provider = create_provider_with_fallback(&ai_config);
+            
+            // Generate messages using AI
+            let rt = Runtime::new().map_err(|e| {
+                eprintln!("Failed to create async runtime: {e}");
+                ExitCode::FAILURE
+            })?;
+            
+            let generated = rt.block_on(async {
+                generate_commit_messages(&diffs, &files, &ai_config, provider.as_ref()).await
+            });
+            
+            let generated_messages = generated.map_err(|e| {
+                eprintln!("Failed to generate commit messages: {e}");
+                eprintln!("You can provide a messages file manually using --messages-file instead.");
+                ExitCode::FAILURE
+            })?;
+            
+            // Convert Vec<String> to CommitMessages
+            let commit_messages: Vec<smartcommit_core::CommitMessage> = generated_messages
+                .into_iter()
+                .map(|text| smartcommit_core::CommitMessage { text })
+                .collect();
+            
+            CommitMessages(commit_messages)
+        }
+    };
 
     let scores = match_files_to_messages(&messages.0, &files, &diffs);
 
@@ -551,7 +579,7 @@ fn render_preview(preview: &Preview) {
 
 fn run_plan(
     repo_path: Option<PathBuf>,
-    messages_file: PathBuf,
+    messages_file: Option<PathBuf>,
     timeline: TimelineArgs,
 ) -> ExitCode {
     let now: DateTime<FixedOffset> = Utc::now().into();
@@ -566,7 +594,7 @@ fn run_plan(
 
 fn run_commit(
     repo_path: Option<PathBuf>,
-    messages_file: PathBuf,
+    messages_file: Option<PathBuf>,
     timeline: TimelineArgs,
     yes: bool,
     dry_run: bool,
@@ -929,117 +957,4 @@ fn safety_label(safety: RepositorySafety) -> &'static str {
     }
 }
 
-/// Run AI-powered commit message generation.
-fn run_ai_generate(
-    repo_path: Option<PathBuf>,
-    _semantic: bool,
-    split: bool,
-    provider_override: Option<String>,
-) -> ExitCode {
-    let rt = Runtime::new().expect("Failed to create Tokio runtime");
-    
-    rt.block_on(async {
-        let target = match resolve_target(repo_path) {
-            Ok(t) => t,
-            Err(code) => return code,
-        };
 
-        // Load AI configuration
-        let mut config = load_ai_config_from_env();
-        
-        // Apply provider override if specified
-        if let Some(provider_str) = provider_override {
-            config.provider = match provider_str.to_lowercase().as_str() {
-                "claude" => ProviderType::Claude,
-                "openai" => ProviderType::OpenAI,
-                "local" => ProviderType::Local,
-                _ => {
-                    eprintln!("Invalid provider: {}. Must be claude, openai, or local", provider_str);
-                    return ExitCode::FAILURE;
-                }
-            };
-        }
-        
-        // Validate AI configuration
-        if let Err(e) = validate_ai_config(&config) {
-            eprintln!("AI configuration error: {}", e);
-            eprintln!();
-            eprintln!("Set the following environment variables:");
-            eprintln!("  - For Claude: ANTHROPIC_API_KEY");
-            eprintln!("  - For OpenAI: OPENAI_API_KEY");
-            eprintln!("  - For Local: OLLAMA_BASE_URL");
-            eprintln!();
-            eprintln!("Or configure provider: SMC_AI_PROVIDER=claude|openai|local");
-            return ExitCode::FAILURE;
-        }
-
-        // Create AI provider
-        let provider = create_provider_with_fallback(&config);
-        
-        // Get staged changes
-        let files = match get_staged_changes(&target) {
-            Ok(files) if files.is_empty() => {
-                println!("No staged changes found.");
-                return ExitCode::FAILURE;
-            }
-            Ok(files) => files,
-            Err(e) => return report_staged_changes_error(e),
-        };
-
-        let diffs = match get_staged_diffs(&target) {
-            Ok(diffs) => diffs,
-            Err(e) => {
-                eprintln!("Warning: could not extract diff content ({e}); AI may be less effective.");
-                Vec::new()
-            }
-        };
-
-        println!("AI Commit Message Generation");
-        println!();
-        println!("Provider: {}", provider.provider_name());
-        println!("Files: {}", files.len());
-        println!("Mode: {}", if split { "split into multiple commits" } else { "single comprehensive message" });
-        println!();
-
-        // Generate commit messages
-        let result = if split {
-            generate_commit_messages(&diffs, &files, &config, provider.as_ref()).await
-        } else {
-            // For single message mode, we'll need to implement this in the AI module
-            // For now, use the multi-message generation and take the first one
-            match generate_commit_messages(&diffs, &files, &config, provider.as_ref()).await {
-                Ok(messages) => {
-                    // Combine into single message for comprehensive view
-                    let combined = messages.join("; ");
-                    Ok(vec![combined])
-                }
-                Err(e) => Err(e),
-            }
-        };
-
-        match result {
-            Ok(messages) => {
-                println!("Generated commit messages:");
-                println!();
-                for (i, msg) in messages.iter().enumerate() {
-                    println!("{}. {}", i + 1, msg);
-                }
-                println!();
-                println!("You can use these messages with:");
-                println!("  smc plan --messages-file <your-messages-file>");
-                println!("  smc commit --messages-file <your-messages-file>");
-                ExitCode::SUCCESS
-            }
-            Err(e) => {
-                eprintln!("Failed to generate commit messages: {}", e);
-                eprintln!();
-                eprintln!("Possible causes:");
-                eprintln!("- API key is invalid or expired");
-                eprintln!("- Network connectivity issues");
-                eprintln!("- Rate limiting by the AI provider");
-                eprintln!("- Insufficient context in the changes");
-                ExitCode::FAILURE
-            }
-        }
-    })
-}
