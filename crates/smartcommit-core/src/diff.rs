@@ -22,6 +22,12 @@ use std::process::Command;
 
 /// One line inside a diff hunk, with its Git-diff prefix already
 /// stripped.
+///
+/// Named `Added`/`Removed` (not `Addition`/`Deletion`) to match the
+/// names already in use throughout the rest of the codebase (Module
+/// 6's matcher, the CLI's `--verbose` renderer) — extending the
+/// existing model rather than introducing a parallel one with
+/// different names for the same concept.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiffLine {
     Context(String),
@@ -29,12 +35,53 @@ pub enum DiffLine {
     Removed(String),
 }
 
+/// Per-hunk line counts (Module 16). `total_changed_lines` is
+/// `additions + deletions` — context lines don't count as "changed."
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct HunkStats {
+    pub additions: usize,
+    pub deletions: usize,
+    pub context: usize,
+    pub total_changed_lines: usize,
+}
+
 /// One `@@ ... @@` hunk within a file's diff.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffHunk {
+    /// Deterministic identifier: `"<file path>#<index>"`, where
+    /// `index` is this hunk's 0-based position among its file's
+    /// hunks (hunks within one file never overlap and are always
+    /// produced in order, so this is unique and stable without
+    /// needing a hash — two hunks with byte-identical content still
+    /// get different IDs whenever they're in different files or at
+    /// different positions in the same file).
+    pub id: String,
+    /// Same as the parent `FileDiff::path` — carried onto the hunk
+    /// itself so a hunk can be handled independently of its file
+    /// (e.g. a flattened list of hunks across files) without losing
+    /// track of which file it belongs to.
+    pub file_path: PathBuf,
+    pub old_start: usize,
+    pub old_count: usize,
+    pub new_start: usize,
+    pub new_count: usize,
     /// The full hunk header line, e.g. `@@ -1,5 +1,5 @@`.
     pub header: String,
     pub lines: Vec<DiffLine>,
+    /// The hunk exactly as it appeared in `git diff` output — the
+    /// header line plus every body line, each still carrying its
+    /// original `+`/`-`/` ` prefix, joined with `\n`. One caveat:
+    /// this is captured via the same line-splitting the rest of the
+    /// parser uses, which (per Rust's `str::lines()`) treats a
+    /// trailing `\r` immediately before `\n` as part of the line
+    /// terminator rather than content — so a file using CRLF line
+    /// endings internally will have that `\r` silently absent here
+    /// too. Parsing itself is unaffected (verified — see
+    /// `extracts_a_hunk_from_a_crlf_file` below); only the literal
+    /// carriage return in `raw_content` and each `DiffLine`'s text
+    /// is not byte-for-byte preserved.
+    pub raw_content: String,
+    pub stats: HunkStats,
 }
 
 /// The staged diff for a single file.
@@ -92,6 +139,38 @@ pub fn get_staged_diffs(path: impl AsRef<std::path::Path>) -> Result<Vec<FileDif
     Ok(parse_unified_diff(&stdout))
 }
 
+/// Parses one `@@ -a[,b] +c[,d] @@ ...` header into
+/// `(old_start, old_count, new_start, new_count)`. Handles an
+/// omitted count (implying `1`, per the unified diff format — git
+/// omits `,1` when a range is exactly one line) and a trailing
+/// "function context" hint git sometimes appends after the closing
+/// `@@` (e.g. `@@ -3 +3 @@ fn foo() {` — confirmed empirically this
+/// appears even for a single-line change).
+fn parse_hunk_header_ranges(header: &str) -> Option<(usize, usize, usize, usize)> {
+    let rest = header.strip_prefix("@@ ")?;
+    let close_idx = rest.find("@@")?;
+    let ranges_part = rest[..close_idx].trim();
+
+    let mut parts = ranges_part.split_whitespace();
+    let old_spec = parts.next()?.strip_prefix('-')?;
+    let new_spec = parts.next()?.strip_prefix('+')?;
+
+    let (old_start, old_count) = parse_range(old_spec)?;
+    let (new_start, new_count) = parse_range(new_spec)?;
+
+    Some((old_start, old_count, new_start, new_count))
+}
+
+/// Parses one side of a hunk range: `"start,count"` or, when the
+/// count is omitted (a one-line range), just `"start"` — in which
+/// case the count is `1`.
+fn parse_range(spec: &str) -> Option<(usize, usize)> {
+    match spec.split_once(',') {
+        Some((start, count)) => Some((start.parse().ok()?, count.parse().ok()?)),
+        None => Some((spec.parse().ok()?, 1)),
+    }
+}
+
 /// Parses the full output of `git diff --cached -M --no-color
 /// --no-ext-diff` into one `FileDiff` per `diff --git` section.
 ///
@@ -106,25 +185,68 @@ pub fn get_staged_diffs(path: impl AsRef<std::path::Path>) -> Result<Vec<FileDif
 fn parse_unified_diff(diff_text: &str) -> Vec<FileDiff> {
     let mut files = Vec::new();
     let mut current_file: Option<FileDiff> = None;
-    let mut current_hunk: Option<DiffHunk> = None;
+    // In-progress hunk state, kept separately from `DiffHunk` itself
+    // since several of its fields (id, stats, parsed ranges) can
+    // only be computed once the hunk is complete.
+    let mut current_hunk: Option<(String, Vec<DiffLine>, Vec<String>)> = None;
+    // 0-based index of the next hunk within the *current file* —
+    // reset to 0 every time a new `diff --git` section starts. This
+    // is what makes hunk IDs deterministic and stable regardless of
+    // hunk content.
+    let mut hunk_index_in_file: usize = 0;
 
-    // Finalizes the in-progress hunk (if any) into the in-progress
-    // file, and the in-progress file (if any) into `files`. Shared
-    // by "we hit the next file/hunk" and "we reached the end".
-    fn finalize_hunk(file: &mut Option<FileDiff>, hunk: &mut Option<DiffHunk>) {
-        if let (Some(f), Some(h)) = (file.as_mut(), hunk.take()) {
-            f.hunks.push(h);
+    fn finalize_hunk(
+        file: &mut Option<FileDiff>,
+        hunk: &mut Option<(String, Vec<DiffLine>, Vec<String>)>,
+        hunk_index_in_file: &mut usize,
+    ) {
+        let (Some(f), Some((header, lines, raw_lines))) = (file.as_mut(), hunk.take()) else {
+            return;
+        };
+
+        let (old_start, old_count, new_start, new_count) =
+            parse_hunk_header_ranges(&header).unwrap_or((0, 0, 0, 0));
+
+        let mut stats = HunkStats::default();
+        for line in &lines {
+            match line {
+                DiffLine::Added(_) => stats.additions += 1,
+                DiffLine::Removed(_) => stats.deletions += 1,
+                DiffLine::Context(_) => stats.context += 1,
+            }
         }
+        stats.total_changed_lines = stats.additions + stats.deletions;
+
+        let id = format!("{}#{}", f.path.display(), *hunk_index_in_file);
+        *hunk_index_in_file += 1;
+
+        f.hunks.push(DiffHunk {
+            id,
+            file_path: f.path.clone(),
+            old_start,
+            old_count,
+            new_start,
+            new_count,
+            header,
+            lines,
+            raw_content: raw_lines.join("\n"),
+            stats,
+        });
     }
 
     for line in diff_text.lines() {
         if let Some(rest) = line.strip_prefix("diff --git a/") {
             // Starting a new file's section: close out whatever was
             // in progress first.
-            finalize_hunk(&mut current_file, &mut current_hunk);
+            finalize_hunk(
+                &mut current_file,
+                &mut current_hunk,
+                &mut hunk_index_in_file,
+            );
             if let Some(f) = current_file.take() {
                 files.push(f);
             }
+            hunk_index_in_file = 0;
 
             // "a/<path> b/<path>" — see the doc comment above for
             // the splitting heuristic and its limitation.
@@ -152,11 +274,12 @@ fn parse_unified_diff(diff_text: &str) -> Vec<FileDiff> {
 
         if let Some(header) = line.strip_prefix("@@ ") {
             // New hunk: close out the previous one first.
-            finalize_hunk(&mut current_file, &mut current_hunk);
-            current_hunk = Some(DiffHunk {
-                header: format!("@@ {header}"),
-                lines: Vec::new(),
-            });
+            finalize_hunk(
+                &mut current_file,
+                &mut current_hunk,
+                &mut hunk_index_in_file,
+            );
+            current_hunk = Some((format!("@@ {header}"), Vec::new(), vec![line.to_string()]));
             continue;
         }
 
@@ -167,31 +290,38 @@ fn parse_unified_diff(diff_text: &str) -> Vec<FileDiff> {
         // intentionally skipped — Module 3 already captures
         // everything about a file's identity and status that this
         // module needs.
-        if current_hunk.is_none() {
+        let Some((_, lines, raw_lines)) = current_hunk.as_mut() else {
             continue;
-        }
+        };
 
         if let Some(rest) = line.strip_prefix('+') {
-            if let (Some(f), Some(h)) = (current_file.as_mut(), current_hunk.as_mut()) {
-                h.lines.push(DiffLine::Added(rest.to_string()));
+            if let Some(f) = current_file.as_mut() {
+                lines.push(DiffLine::Added(rest.to_string()));
+                raw_lines.push(line.to_string());
                 f.additions += 1;
             }
         } else if let Some(rest) = line.strip_prefix('-') {
-            if let (Some(f), Some(h)) = (current_file.as_mut(), current_hunk.as_mut()) {
-                h.lines.push(DiffLine::Removed(rest.to_string()));
+            if let Some(f) = current_file.as_mut() {
+                lines.push(DiffLine::Removed(rest.to_string()));
+                raw_lines.push(line.to_string());
                 f.deletions += 1;
             }
         } else if let Some(rest) = line.strip_prefix(' ') {
-            if let Some(h) = current_hunk.as_mut() {
-                h.lines.push(DiffLine::Context(rest.to_string()));
-            }
+            lines.push(DiffLine::Context(rest.to_string()));
+            raw_lines.push(line.to_string());
         }
         // A line starting with `\` (e.g. "\ No newline at end of
         // file") is a marker, not content — deliberately not
-        // pushed as a DiffLine and not counted.
+        // pushed as a DiffLine, not counted, and not added to
+        // raw_lines (raw_content is "the hunk's actual diff lines,"
+        // not every line of surrounding git output).
     }
 
-    finalize_hunk(&mut current_file, &mut current_hunk);
+    finalize_hunk(
+        &mut current_file,
+        &mut current_hunk,
+        &mut hunk_index_in_file,
+    );
     if let Some(f) = current_file.take() {
         files.push(f);
     }
@@ -401,12 +531,251 @@ mod tests {
 
         let renamed = diffs
             .iter()
-            .find(|d| d.path == std::path::Path::new("renamed.txt"))
+            .find(|d| d.path == Path::new("renamed.txt"))
             .expect("renamed.txt should be present");
         // An unmodified rename has no content diff, so no hunks —
         // it's still correctly identified as renamed.txt rather
         // than showing up as a 20-line delete+add.
         assert!(renamed.hunks.is_empty());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    // --- Module 16: hunk-level fields ---
+
+    #[test]
+    fn hunk_exposes_correct_ranges_and_stats() {
+        let dir = init_repo("hunk-ranges-and-stats");
+        write_file(&dir.join("README.md"), "one\ntwo\nthree\n");
+        git(&dir, &["add", "README.md"]);
+        git(&dir, &["commit", "--quiet", "-m", "three lines"]);
+
+        write_file(&dir.join("README.md"), "one\nCHANGED\nthree\nfour\n");
+        git(&dir, &["add", "README.md"]);
+
+        let diffs = get_staged_diffs(&dir).expect("should succeed");
+        let hunk = &diffs[0].hunks[0];
+
+        assert_eq!(hunk.old_start, 1);
+        assert_eq!(hunk.old_count, 3);
+        assert_eq!(hunk.new_start, 1);
+        assert_eq!(hunk.new_count, 4);
+        assert_eq!(hunk.stats.additions, 2, "\"CHANGED\" and \"four\"");
+        assert_eq!(hunk.stats.deletions, 1, "\"two\"");
+        assert_eq!(hunk.stats.context, 2, "\"one\" and \"three\"");
+        assert_eq!(hunk.stats.total_changed_lines, 3);
+        assert_eq!(hunk.file_path, PathBuf::from("README.md"));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn hunk_ids_are_deterministic_across_repeated_parses() {
+        let dir = init_repo("deterministic-ids");
+        write_file(&dir.join("README.md"), "changed\n");
+        git(&dir, &["add", "README.md"]);
+
+        let first = get_staged_diffs(&dir).expect("should succeed");
+        let second = get_staged_diffs(&dir).expect("should succeed");
+
+        assert_eq!(
+            first[0].hunks[0].id, second[0].hunks[0].id,
+            "the same diff parsed twice must produce the same hunk id"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn identical_looking_hunks_in_different_files_get_different_ids() {
+        let dir = init_repo("identical-looking-hunks");
+        write_file(&dir.join("a.txt"), "x\n");
+        write_file(&dir.join("b.txt"), "x\n");
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "--quiet", "-m", "two identical files"]);
+
+        // Same single-line change in both files — byte-identical
+        // hunk header and content, apart from the file path.
+        write_file(&dir.join("a.txt"), "y\n");
+        write_file(&dir.join("b.txt"), "y\n");
+        git(&dir, &["add", "-A"]);
+
+        let diffs = get_staged_diffs(&dir).expect("should succeed");
+        assert_eq!(diffs.len(), 2);
+
+        let hunk_a = &diffs
+            .iter()
+            .find(|d| d.path == Path::new("a.txt"))
+            .unwrap()
+            .hunks[0];
+        let hunk_b = &diffs
+            .iter()
+            .find(|d| d.path == Path::new("b.txt"))
+            .unwrap()
+            .hunks[0];
+
+        assert_eq!(
+            hunk_a.header, hunk_b.header,
+            "sanity check: headers really are identical"
+        );
+        assert_ne!(
+            hunk_a.id, hunk_b.id,
+            "identical-content hunks in different files must still get different ids"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn hunk_order_is_preserved_and_ids_reflect_position() {
+        let dir = init_repo("preserved-order");
+        let lines: Vec<String> = (1..=30).map(|n| n.to_string()).collect();
+        write_file(&dir.join("nums.txt"), &(lines.join("\n") + "\n"));
+        git(&dir, &["add", "nums.txt"]);
+        git(&dir, &["commit", "--quiet", "-m", "add nums"]);
+
+        let mut lines = lines;
+        lines[1] = "CHANGED_TOP".to_string();
+        lines[28] = "CHANGED_BOTTOM".to_string();
+        write_file(&dir.join("nums.txt"), &(lines.join("\n") + "\n"));
+        git(&dir, &["add", "nums.txt"]);
+
+        let diffs = get_staged_diffs(&dir).expect("should succeed");
+        let hunks = &diffs[0].hunks;
+        assert_eq!(hunks.len(), 2);
+
+        assert_eq!(hunks[0].id, "nums.txt#0");
+        assert_eq!(hunks[1].id, "nums.txt#1");
+        assert!(
+            hunks[0].old_start < hunks[1].old_start,
+            "hunks must stay in the order they appear in the file"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn omitted_hunk_count_is_treated_as_one() {
+        let dir = init_repo("omitted-count");
+        // A one-line file guarantees the hunk's old/new spans are
+        // exactly 1 line regardless of git's default 3-line context
+        // window — there's nothing else in the file to pull in as
+        // context. That's what actually triggers the omitted-count
+        // header form (confirmed empirically: "@@ -1 +1 @@").
+        write_file(&dir.join("f.txt"), "original\n");
+        git(&dir, &["add", "f.txt"]);
+        git(&dir, &["commit", "--quiet", "-m", "one line"]);
+
+        write_file(&dir.join("f.txt"), "changed\n");
+        git(&dir, &["add", "f.txt"]);
+
+        let diffs = get_staged_diffs(&dir).expect("should succeed");
+        let hunk = &diffs[0].hunks[0];
+
+        assert_eq!(
+            hunk.header, "@@ -1 +1 @@",
+            "sanity check: git really did omit both counts"
+        );
+        assert_eq!(hunk.old_count, 1);
+        assert_eq!(hunk.new_count, 1);
+        assert_eq!(hunk.old_start, 1);
+        assert_eq!(hunk.new_start, 1);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn handles_unicode_content() {
+        let dir = init_repo("unicode");
+        write_file(&dir.join("u.txt"), "café\n日本語\n");
+        git(&dir, &["add", "u.txt"]);
+        git(&dir, &["commit", "--quiet", "-m", "unicode base"]);
+
+        write_file(&dir.join("u.txt"), "café résumé\n日本語テスト\n");
+        git(&dir, &["add", "u.txt"]);
+
+        let diffs = get_staged_diffs(&dir).expect("should succeed");
+        let hunk = &diffs[0].hunks[0];
+
+        assert_eq!(hunk.stats.additions, 2);
+        assert_eq!(hunk.stats.deletions, 2);
+        assert!(hunk
+            .lines
+            .iter()
+            .any(|l| matches!(l, DiffLine::Added(t) if t.contains("résumé"))));
+        assert!(hunk
+            .lines
+            .iter()
+            .any(|l| matches!(l, DiffLine::Added(t) if t.contains("テスト"))));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn handles_crlf_content_without_corrupting_the_parse() {
+        let dir = init_repo("crlf");
+        fs::write(dir.join("c.txt"), "line1\r\nline2\r\n").expect("failed to write CRLF fixture");
+        git(&dir, &["add", "c.txt"]);
+        git(&dir, &["commit", "--quiet", "-m", "crlf base"]);
+
+        fs::write(dir.join("c.txt"), "line1\r\nCHANGED\r\n").expect("failed to write CRLF fixture");
+        git(&dir, &["add", "c.txt"]);
+
+        let diffs = get_staged_diffs(&dir).expect("should succeed");
+        assert_eq!(diffs.len(), 1);
+        let hunk = &diffs[0].hunks[0];
+
+        // Parsing must not choke on or miscount CRLF content — one
+        // context line, one deletion, one addition. Note: the literal
+        // \r is not preserved in the captured text (see raw_content's
+        // doc comment) since Rust's `str::lines()` treats it as part
+        // of the line terminator, not content; this test intentionally
+        // does not assert the \r survives, only that parsing stays
+        // correct despite it.
+        assert_eq!(hunk.stats.context, 1);
+        assert_eq!(hunk.stats.deletions, 1);
+        assert_eq!(hunk.stats.additions, 1);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn raw_content_includes_header_and_prefixed_body_lines() {
+        let dir = init_repo("raw-content");
+        write_file(&dir.join("README.md"), "changed\n");
+        git(&dir, &["add", "README.md"]);
+
+        let diffs = get_staged_diffs(&dir).expect("should succeed");
+        let hunk = &diffs[0].hunks[0];
+
+        assert!(hunk.raw_content.starts_with(&hunk.header));
+        assert!(hunk.raw_content.contains("-initial"));
+        assert!(hunk.raw_content.contains("+changed"));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn multiple_files_each_index_their_own_hunks_from_zero() {
+        let dir = init_repo("multi-file-indexing");
+        write_file(&dir.join("a.txt"), "1\n");
+        write_file(&dir.join("b.txt"), "1\n");
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "--quiet", "-m", "two files"]);
+
+        write_file(&dir.join("a.txt"), "2\n");
+        write_file(&dir.join("b.txt"), "2\n");
+        git(&dir, &["add", "-A"]);
+
+        let diffs = get_staged_diffs(&dir).expect("should succeed");
+        assert_eq!(diffs.len(), 2);
+        for diff in &diffs {
+            assert_eq!(
+                diff.hunks[0].id,
+                format!("{}#0", diff.path.display()),
+                "each file's first hunk should be index 0 within that file"
+            );
+        }
 
         fs::remove_dir_all(&dir).ok();
     }
