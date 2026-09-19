@@ -2261,7 +2261,7 @@ architecture.
 | §9 Repository | `crates/smartcommit-core/src/repository.rs` |
 | §10 Repository State | `crates/smartcommit-core/src/repository_state.rs` |
 | §11 Change Discovery | `crates/smartcommit-core/src/staged_changes.rs` |
-| §12 Diff | `crates/smartcommit-core/src/diff.rs` |
+| §12 Diff (extended for hunk-level analysis, Module 16 — see below) | `crates/smartcommit-core/src/diff.rs` |
 | §13 Message | `crates/smartcommit-core/src/message_parser.rs` |
 | §14–§16 Matching | `crates/smartcommit-core/src/matcher.rs` |
 | §17–§19 Commit Planner | `crates/smartcommit-core/src/planner.rs` |
@@ -2270,10 +2270,40 @@ architecture.
 | §25–§29 Execution Layer | `crates/smartcommit-core/src/executor.rs` |
 | §33–§36 CLI Architecture / Command Flow / Dry-Run | `crates/smartcommit-cli/src/main.rs` |
 | §30–§32 Recovery Module / Operation Record / Restore Architecture | `crates/smartcommit-core/src/operation_record.rs`, `crates/smartcommit-core/src/restore.rs` |
+| §37 Configuration | `crates/smartcommit-core/src/config.rs` |
 
 Each is a plain Rust module within `smartcommit-core`, per §8 ("These
 can initially be Rust modules within one crate. They do not need to
 become separate crates.").
+
+## Module 16 — Hunk-level diff analysis
+
+`§12 Diff`'s `DiffHunk` was extended (not duplicated — a separate
+parallel hunk model was explicitly avoided) with: a deterministic
+`id` (`"<file path>#<index>"`, unique per file via 0-based hunk
+position — no hashing needed, since hunks within a file are already
+ordered and non-overlapping), `file_path`, parsed `old_start`/
+`old_count`/`new_start`/`new_count`, `raw_content` (the hunk's
+original text, header plus every prefixed body line), and `stats:
+HunkStats { additions, deletions, context, total_changed_lines }`.
+
+This is analysis and representation only — no hunk *splitting* or
+commit construction exists yet (deliberately out of scope for this
+pass; see `PROJECT_STATE.md`). `scm analyze --verbose` surfaces the
+new per-hunk fields as one additional summary line per hunk, without
+changing any previously-existing output.
+
+## CLI binary rename: `smartcommit` → `scm`
+
+As of Module 16, the produced binary is named `scm` (was
+`smartcommit`) — `[[bin]] name` in `crates/smartcommit-cli/Cargo.toml`
+and the `clap` command name in `main.rs`. This was scoped narrowly:
+the Rust package/crate names (`smartcommit-core`, `smartcommit-cli`)
+are unchanged, and so is the `refs/smartcommit/backups/` Git ref
+namespace `checkpoint.rs` (Module 9) writes and `restore.rs`
+(Module 12) reads — that's a stored, load-bearing ref prefix, not
+part of "the official CLI command," and renaming it would be a
+distinct data-migration concern this pass didn't undertake.
 
 ## Git integration approach (relevant to §38, §51, §54)
 

@@ -154,7 +154,7 @@ it at the end of every module.
 
 ## Current module
 
-Nothing in progress. Module 12 is complete and verified.
+Nothing in progress. Module 16 is complete and verified.
 
 ## Corrections made while starting Module 6
 
@@ -751,23 +751,155 @@ tool** — the full core loop (`git add .` → `smartcommit plan` →
   correct manual command printed); and the "no operation recorded
   yet" case on a fresh repository
 
+## Module 13 — Configuration ✅ (completed by a later contributor; backfilled here)
+
+- `.smartcommit.toml` support via `smartcommit-core::config`:
+  `SmartCommitConfig { matching, timeline, commit }`, loaded with
+  `load_config(repo_root)`. Missing file falls back to defaults;
+  invalid TOML or out-of-range values produce a readable
+  `ConfigError`.
+- Wired into the CLI with the documented resolution order (CLI flag
+  \> config file \> built-in default).
+- This work (and Module 14 below) was done in a later session/
+  contributor pass that continued past this file's last update —
+  `PROJECT_STATE.md` had been left saying "Module 12 complete, Module
+  13 next" even though the code already had both done. Backfilled
+  here while starting Module 16, since an out-of-date project-state
+  file undermines the whole point of keeping one.
+
+## Module 14 — End-to-End MVP Test Suite ✅ (completed by a later contributor; backfilled here)
+
+- `crates/smartcommit-cli/tests/end_to_end.rs` — 17 scenarios
+  (`s01`–`s17`), matching modules.md's own Module 14 scenario list
+  closely: the main three-file/three-commit scenario, no repository,
+  no staged changes, one message, multiple messages, an ambiguous
+  file left unassigned, an unassigned file remaining staged and
+  never committed, added/deleted files committed correctly, unstaged
+  changes preserved end-to-end, timeline timestamps applied, dry run
+  makes no Git modification, user cancellation exits with code 2,
+  a recovery checkpoint created before commits, restore reverting an
+  operation and re-staging its files, a binary file not crashing the
+  tool, and invalid config rejected before any Git work happens.
+- Counted in the "17 passed" middle test group in every verification
+  block below (separate from the `smartcommit-cli` unit-test binary
+  and the `smartcommit-core` library tests).
+
+## Module 15 — MVP Polish and Release Preparation: NOT DONE
+
+No `CHANGELOG.md`, no `SECURITY.md`, and no release-checklist pass
+(cross-platform review, `--help` text audit, etc.) exist in this
+repository as of Module 16. Flagging this explicitly rather than
+letting it go unmentioned: a prior instruction claimed "Modules 0-15
+are COMPLETE," and that claim is not accurate for Module 15
+specifically. Modules 0-14 do appear genuinely done. Module 15
+remains open.
+
+## Module 16 — Hunk-Level Change Analysis ✅
+
+**Scope note:** this module also renamed the CLI binary from
+`smartcommit` to `scm`, per an explicit instruction accompanying the
+Module 16 spec ("Do not use `smartcommit` as the primary CLI
+command"). Scoped narrowly: only the *produced binary name*
+changed (`[[bin]] name` in `crates/smartcommit-cli/Cargo.toml`, the
+`clap` `command(name = ...)`, both test files'
+`CARGO_BIN_EXE_scm` references, and the two user-facing strings that
+mentioned the old command by name). The Rust package/crate names
+(`smartcommit-core`, `smartcommit-cli`) and the `refs/smartcommit/backups/`
+Git ref namespace (Module 9) were deliberately left unchanged — the
+former is an internal implementation detail with no bearing on "the
+official CLI command," and the latter is a stored, load-bearing Git
+ref prefix that Module 12's restore logic parses; renaming it would
+be a real, separate migration concern the spec never asked for.
+
+- Extended `smartcommit-core::diff` (Module 4) rather than
+  duplicating a new hunk model, per the spec's own explicit
+  instruction. `DiffHunk` gained: `id`, `file_path`, `old_start`,
+  `old_count`, `new_start`, `new_count`, `raw_content`, `stats:
+  HunkStats { additions, deletions, context, total_changed_lines }`.
+  `header` and `lines: Vec<DiffLine>` (already present since Module
+  4) are unchanged. `DiffLine` itself keeps its existing `Added`/
+  `Removed` names rather than being renamed to `Addition`/`Deletion`
+  as the spec's requirements list phrases it — renaming would have
+  broken Module 6's matcher and every existing call site for a
+  purely cosmetic reason, which conflicts with the same spec's own
+  "extend, don't duplicate" instruction more than the naming
+  requirement was likely intended to force
+- **Deterministic hunk IDs**: `"<file path>#<index>"`, where `index`
+  is the hunk's 0-based position among its *own file's* hunks.
+  Chosen over a content hash because hunks within one file are
+  already strictly ordered and non-overlapping — file path + index
+  is unique and stable with no hashing needed, and it directly
+  satisfies the "identical-looking hunks get different IDs" test
+  requirement (two files with byte-identical single-line changes
+  still differ by file path)
+- **Header parsing verified empirically before writing the parser**:
+  confirmed a single-line hunk range genuinely omits its count
+  (`@@ -1 +1 @@`, not `@@ -1,1 +1,1 @@`), and that git sometimes
+  appends a "function context" hint after the closing `@@`
+  (`@@ -3 +3 @@ some nearby line`) even for an otherwise plain
+  single-line change — the parser handles both
+- **Unicode**: no special handling needed: file content round-trips
+  as plain UTF-8 through the existing line-based parser, confirmed
+  with café/résumé/日本語 test content
+- **CRLF**: confirmed empirically that Rust's `str::lines()` treats a
+  `\r` immediately before `\n` as part of the line terminator, not
+  content — so a CRLF file's embedded `\r` doesn't appear in captured
+  `DiffLine` text or `raw_content`, though parsing itself is
+  completely unaffected (correct hunk/line counts either way).
+  Documented on `raw_content`'s own doc comment rather than treated
+  as a bug, since exact byte preservation was never a stated
+  requirement — only correct parsing was
+- Binary files: unchanged from Module 4 — `is_binary` still set via
+  git's own `Binary files ... differ` marker, `hunks` stays empty,
+  no textual parsing is attempted
+- Rename/copy behavior: unchanged from Module 4 — verified by
+  rerunning the existing `correctly_diffs_a_rename_alongside_other_changes`
+  test unmodified
+- CLI: `scm analyze --verbose` gains one new summary line per hunk
+  (`[id] +A -D =C (old s,c new s,c)`) printed *before* the existing
+  header/body-line output, which is byte-for-byte unchanged —
+  confirmed no existing test asserted anything about `--verbose`
+  output before this change, so there was nothing to regress
+- This module is read-only, as required: no `git add`/`reset`/
+  `restore`/`checkout`/`clean`/`commit` appears anywhere in
+  `diff.rs`, and every new test only reads staged diffs, never
+  mutates the repository beyond the normal test-fixture setup
+- Tests: 9 new unit tests in `diff.rs` — hunk ranges/stats on a
+  known diff, deterministic IDs across repeated parses, identical-
+  looking hunks in different files getting different IDs, hunk order
+  preserved with IDs reflecting position, omitted hunk count treated
+  as 1 (verified against a real one-line-file diff, after an initial
+  test-fixture mistake using a 5-line file was caught by a real test
+  failure — default 3-line context pulled the whole file into one
+  hunk, so the "omitted count" case needs a file with no room for
+  extra context), Unicode content, CRLF content, `raw_content`
+  containing the header and prefixed body lines, and per-file hunk
+  indexing starting from 0 independently for each file
+- Two pre-existing `cargo fmt`/`clippy` issues (unrelated to this
+  module's new code — a needless double-borrow in `main.rs` twice,
+  and a single-char string pattern in a `checkpoint.rs` test) were
+  fixed as part of getting the required `cargo fmt --check` /
+  `cargo clippy --workspace --all-targets -- -D warnings` commands to
+  pass clean, since the spec's own testing section requires both to
+  succeed for the whole workspace, not just new code
+
 ## Next module
 
-Module 13 — Configuration. `.smartcommit.toml` for the currently
-hardcoded values that would benefit from being adjustable — matcher
-thresholds (`MIN_ASSIGNMENT_SCORE`, `AMBIGUITY_MARGIN` from Module
-7), default timeline interval, and confirmation behavior — with CLI
-flags still taking precedence over the config file, and the config
-file over built-in defaults.
+Module 17 is explicitly out of scope per this module's own
+completion rule ("Do NOT implement Module 17"). The two open items
+from this pass are: Module 15 (release polish — `CHANGELOG.md`,
+`SECURITY.md`, a real release checklist) and actual hunk-level
+*splitting*/commit construction, which this module deliberately
+does not implement (analysis and representation only, per its own
+Objective).
 
 ## Last successful verification
 
 ```text
-cargo build --workspace   → success
-cargo test --workspace    → 103 passed, 0 failed (12 CLI + 91 core)
-smartcommit commit --yes then smartcommit restore --yes
-  -> HEAD returns to exact pre-operation commit, both files re-staged automatically, exit 0
-smartcommit restore after an unrelated intervening commit
-  -> Safety: BLOCKED, correct reasons shown, repository untouched, exit 1, manual instructions printed
-smartcommit restore with no prior operation -> "No SmartCommit operation found to restore.", exit 1
+cargo fmt --check                                          → clean
+cargo clippy --workspace --all-targets -- -D warnings       → clean
+cargo build --workspace                                     → success
+cargo test --workspace    → 144 passed, 0 failed (12 CLI + 17 end-to-end + 115 core)
+scm analyze --verbose → new per-hunk summary line, all pre-existing output unchanged
+scm --version → "scm 0.1.0" (binary rename confirmed)
 ```
