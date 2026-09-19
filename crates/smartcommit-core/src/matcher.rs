@@ -289,14 +289,23 @@ mod tests {
     }
 
     fn diff_with_added_lines(path: &str, added_lines: &[&str]) -> FileDiff {
+        let lines: Vec<DiffLine> = added_lines
+            .iter()
+            .map(|l| DiffLine::Added(l.to_string()))
+            .collect();
         FileDiff {
             path: PathBuf::from(path),
             hunks: vec![DiffHunk {
+                id: format!("{path}#0"),
+                file_path: PathBuf::from(path),
+                old_start: 1,
+                old_count: 1,
+                new_start: 1,
+                new_count: 1,
                 header: "@@ -1,1 +1,1 @@".to_string(),
-                lines: added_lines
-                    .iter()
-                    .map(|l| DiffLine::Added(l.to_string()))
-                    .collect(),
+                lines,
+                raw_content: String::new(),
+                stats: Default::default(),
             }],
             additions: added_lines.len(),
             deletions: 0,

@@ -1,8 +1,8 @@
 //! `smartcommit-core` — the Git engine and planning logic for
 //! SmartCommit, independent of any CLI or UI.
 //!
-//! This crate can be used with or without AI capabilities.
-//! AI features are optional and require external API keys.
+//! This crate must remain usable without AI/an external LLM, and
+//! must not depend on `smartcommit-cli`.
 
 mod checkpoint;
 mod config;
@@ -17,9 +17,6 @@ mod repository_state;
 mod restore;
 mod staged_changes;
 mod timeline;
-
-// AI module (optional, requires runtime configuration)
-pub mod ai;
 
 pub use checkpoint::{create_safety_checkpoint, CheckpointError, SafetyCheckpoint};
 pub use config::{
