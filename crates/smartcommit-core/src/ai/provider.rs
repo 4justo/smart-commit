@@ -1,10 +1,14 @@
 //! AI provider abstraction supporting multiple backends.
 
+#[cfg(feature = "ai")]
 use async_trait::async_trait;
+#[cfg(feature = "ai")]
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "ai")]
 use thiserror::Error;
 
 /// Error types for AI provider operations.
+#[cfg(feature = "ai")]
 #[derive(Error, Debug)]
 pub enum ProviderError {
     #[error("API request failed: {0}")]

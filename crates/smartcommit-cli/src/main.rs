@@ -13,7 +13,6 @@
 
 use clap::{Args, Parser, Subcommand};
 use smartcommit_core::{
-    ai::{create_provider_with_fallback, generate_commit_messages, load_ai_config_from_env, validate_ai_config},
     build_commit_plan, create_safety_checkpoint, execute_commit_plan, execute_restore,
     get_staged_changes, get_staged_diffs, inspect_repository_state, load_config,
     manual_recovery_instructions, match_files_to_messages, plan_restore, save_operation_record,
@@ -22,7 +21,13 @@ use smartcommit_core::{
     ParseCommitMessagesError, PlannedCommitTime, Repository, RepositoryError, RepositorySafety,
     RestoreError, RestorePlan, StagedChangesError, SystemRandomSource, TimelineMode, Utc,
 };
+
+#[cfg(feature = "ai")]
+use smartcommit_core::ai::{analyze_hunks, create_provider_with_fallback, generate_commit_messages, load_ai_config_from_env, validate_ai_config};
+
+#[cfg(feature = "ai")]
 use tokio::runtime::Runtime;
+
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -57,6 +62,11 @@ enum Commands {
         /// for every non-binary file, not just the summary.
         #[arg(long)]
         verbose: bool,
+        
+        /// Use AI to perform semantic hunk analysis
+        #[cfg(feature = "ai")]
+        #[arg(long)]
+        ai: bool,
     },
     /// Preview a commit plan from a messages file and the currently
     /// staged changes. Read-only — makes no Git modification.
@@ -209,7 +219,10 @@ fn main() -> ExitCode {
 
     match cli.command {
         Commands::Doctor => run_doctor(cli.repo),
-        Commands::Analyze { verbose } => run_analyze(cli.repo, verbose),
+        #[cfg(feature = "ai")]
+        Commands::Analyze { verbose, ai } => run_analyze(cli.repo, verbose, ai),
+        #[cfg(not(feature = "ai"))]
+        Commands::Analyze { verbose, .. } => run_analyze(cli.repo, verbose, false),
         Commands::Plan {
             messages_file,
             timeline,
@@ -263,7 +276,8 @@ fn run_doctor(repo_path: Option<PathBuf>) -> ExitCode {
     }
 }
 
-fn run_analyze(repo_path: Option<PathBuf>, verbose: bool) -> ExitCode {
+#[cfg(feature = "ai")]
+fn run_analyze(repo_path: Option<PathBuf>, verbose: bool, ai: bool) -> ExitCode {
     let target = match resolve_target(repo_path) {
         Ok(t) => t,
         Err(code) => return code,
@@ -292,6 +306,41 @@ fn run_analyze(repo_path: Option<PathBuf>, verbose: bool) -> ExitCode {
 
     println!("Staged changes: {}", files.len());
     println!();
+    
+    // Perform AI hunk analysis if requested
+    if ai {
+        println!("AI Hunk Analysis");
+        println!("================");
+        println!();
+        
+        let ai_config = load_ai_config_from_env();
+        if let Err(e) = validate_ai_config(&ai_config) {
+            eprintln!("AI configuration error: {e}");
+            eprintln!("Please set the required environment variables for your chosen provider.");
+            eprintln!("Supported providers: claude (ANTHROPIC_API_KEY), openai (OPENAI_API_KEY), local (OLLAMA_BASE_URL)");
+            return ExitCode::FAILURE;
+        }
+        
+        let provider = create_provider_with_fallback(&ai_config);
+        let rt = Runtime::new().expect("Failed to create Tokio runtime");
+        
+        let analysis = rt.block_on(async {
+            analyze_hunks(&diffs, &ai_config, provider.as_ref()).await
+        });
+        
+        match analysis {
+            Ok(diff_analysis) => {
+                print_ai_analysis(&diff_analysis);
+                println!();
+            }
+            Err(e) => {
+                eprintln!("AI analysis failed: {e}");
+                eprintln!("Falling back to standard analysis.");
+                println!();
+            }
+        }
+    }
+    
     for file in &files {
         let label = match file.change_kind {
             ChangeKind::Added => "Added",
@@ -313,7 +362,63 @@ fn run_analyze(repo_path: Option<PathBuf>, verbose: bool) -> ExitCode {
         }
         println!();
     }
+    
+    ExitCode::SUCCESS
+}
 
+#[cfg(not(feature = "ai"))]
+fn run_analyze(repo_path: Option<PathBuf>, verbose: bool, _ai: bool) -> ExitCode {
+    let target = match resolve_target(repo_path) {
+        Ok(t) => t,
+        Err(code) => return code,
+    };
+
+    let files = match get_staged_changes(&target) {
+        Ok(files) if files.is_empty() => {
+            println!("No staged changes found.");
+            return ExitCode::FAILURE;
+        }
+        Ok(files) => files,
+        Err(e) => return report_staged_changes_error(e),
+    };
+
+    // A diff-extraction failure shouldn't hide the file list we
+    // already have from get_staged_changes — fall back to listing
+    // files without diff stats rather than losing the whole
+    // command's output over a secondary failure.
+    let diffs = match get_staged_diffs(&target) {
+        Ok(diffs) => diffs,
+        Err(e) => {
+            eprintln!("Warning: could not extract diff content ({e}); showing file list only.");
+            Vec::new()
+        }
+    };
+
+    println!("Staged changes: {}", files.len());
+    println!();
+    
+    for file in &files {
+        let label = match file.change_kind {
+            ChangeKind::Added => "Added",
+            ChangeKind::Modified => "Modified",
+            ChangeKind::Deleted => "Deleted",
+            ChangeKind::Renamed => "Renamed",
+        };
+        match (&file.change_kind, &file.old_path) {
+            (ChangeKind::Renamed, Some(old)) => {
+                println!("{label:<9} {} -> {}", old.display(), file.path.display());
+            }
+            _ => {
+                println!("{label:<9} {}", file.path.display());
+            }
+        }
+
+        if let Some(diff) = diffs.iter().find(|d| d.path == file.path) {
+            print_diff_summary(diff, verbose);
+        }
+        println!();
+    }
+    
     ExitCode::SUCCESS
 }
 
@@ -876,6 +981,44 @@ fn print_diff_summary(diff: &FileDiff, verbose: bool) {
                 }
             }
         }
+    }
+}
+
+#[cfg(feature = "ai")]
+fn print_ai_analysis(analysis: &smartcommit_core::ai::DiffAnalysis) {
+    println!("Overall Assessment:");
+    println!("  Complexity: {}/10", analysis.overall_complexity);
+    println!("  Risk Level: {:?}", analysis.overall_risk);
+    println!();
+    
+    println!("Recommendations:");
+    for recommendation in &analysis.recommendations {
+        println!("  - {}", recommendation);
+    }
+    println!();
+    
+    println!("Suggested Commit Groupings:");
+    for (i, group) in analysis.suggested_groups.iter().enumerate() {
+        println!("  Group {}:", i + 1);
+        for hunk_id in group {
+            println!("    - {}", hunk_id);
+        }
+    }
+    println!();
+    
+    println!("Hunk-Level Analysis:");
+    for hunk_analysis in &analysis.hunk_analyses {
+        println!("  {}:", hunk_analysis.hunk_id);
+        println!("    Category: {:?}", hunk_analysis.category);
+        println!("    Risk: {:?}", hunk_analysis.risk_level);
+        println!("    Complexity: {}/10", hunk_analysis.complexity);
+        println!("    Description: {}", hunk_analysis.description);
+        println!("    Should split: {}", hunk_analysis.should_split);
+        if !hunk_analysis.related_hunks.is_empty() {
+            println!("    Related hunks: {:?}", hunk_analysis.related_hunks);
+        }
+        println!("    Reasoning: {}", hunk_analysis.reasoning);
+        println!();
     }
 }
 

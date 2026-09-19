@@ -18,6 +18,10 @@ mod restore;
 mod staged_changes;
 mod timeline;
 
+// AI module (optional, can be disabled if needed)
+#[cfg(feature = "ai")]
+pub mod ai;
+
 pub use checkpoint::{create_safety_checkpoint, CheckpointError, SafetyCheckpoint};
 pub use config::{
     load_config, CommitConfig, ConfigError, MatchingConfig, SmartCommitConfig, TimelineConfig,
@@ -45,6 +49,15 @@ pub use timeline::{
     apply_timeline_to_plan, generate_timeline, ApplyTimelineError, PlannedCommitTime, RandomSource,
     SeededRandomSource, SystemRandomSource, TimedCommitGroup, TimedCommitPlan, TimelineError,
     TimelineMode,
+};
+
+// AI exports (only available when ai feature is enabled)
+#[cfg(feature = "ai")]
+pub use ai::{
+    analyze_hunks, create_provider, create_provider_with_fallback, generate_commit_messages,
+    load_ai_config_from_env, validate_ai_config, AIConfig, AIProvider, ChangeCategory, DiffAnalysis,
+    GenerationError, HunkAnalysis, HunkAnalysisError, MessageRequest, MessageResponse, ModelSelection,
+    ProviderType, RiskLevel,
 };
 
 // Re-exported so downstream crates (smartcommit-cli and later

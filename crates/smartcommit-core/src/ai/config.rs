@@ -1,8 +1,10 @@
 //! AI configuration for SmartCommit.
 
+#[cfg(feature = "ai")]
 use serde::{Deserialize, Serialize};
 
 /// AI configuration options.
+#[cfg(feature = "ai")]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AIConfig {
     /// Which AI provider to use.
