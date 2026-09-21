@@ -22,20 +22,14 @@ fn cargo_bin_path() -> std::path::PathBuf {
 
 fn temp_messages_file(contents: &str, label: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-    let path = std::env::temp_dir().join(format!(
-        "smc-cli-{label}-{}-{n}.txt",
-        std::process::id()
-    ));
+    let path = std::env::temp_dir().join(format!("smc-cli-{label}-{}-{n}.txt", std::process::id()));
     fs::write(&path, contents).expect("failed to write temporary messages file");
     path
 }
 
 fn temp_dir(label: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!(
-        "smc-cli-repo-{label}-{}-{n}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("smc-cli-repo-{label}-{}-{n}", std::process::id()));
     fs::create_dir_all(&dir).expect("failed to create temp repo dir");
     dir
 }
@@ -97,10 +91,7 @@ fn version_flag_prints_version_and_exits_zero() {
         .output()
         .expect("failed to run smc binary");
 
-    assert!(
-        output.status.success(),
-        "smc --version should exit 0"
-    );
+    assert!(output.status.success(), "smc --version should exit 0");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("smc"),

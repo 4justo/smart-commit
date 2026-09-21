@@ -23,7 +23,10 @@ use smartcommit_core::{
 };
 
 #[cfg(feature = "ai")]
-use smartcommit_core::ai::{analyze_hunks, create_provider_with_fallback, generate_commit_messages, load_ai_config_from_env, validate_ai_config};
+use smartcommit_core::ai::{
+    analyze_hunks, create_provider_with_fallback, generate_commit_messages,
+    load_ai_config_from_env, validate_ai_config,
+};
 
 #[cfg(feature = "ai")]
 use tokio::runtime::Runtime;
@@ -62,7 +65,7 @@ enum Commands {
         /// for every non-binary file, not just the summary.
         #[arg(long)]
         verbose: bool,
-        
+
         /// Use AI to perform semantic hunk analysis
         #[cfg(feature = "ai")]
         #[arg(long)]
@@ -306,13 +309,13 @@ fn run_analyze(repo_path: Option<PathBuf>, verbose: bool, ai: bool) -> ExitCode 
 
     println!("Staged changes: {}", files.len());
     println!();
-    
+
     // Perform AI hunk analysis if requested
     if ai {
         println!("AI Hunk Analysis");
         println!("================");
         println!();
-        
+
         let ai_config = load_ai_config_from_env();
         if let Err(e) = validate_ai_config(&ai_config) {
             eprintln!("AI configuration error: {e}");
@@ -320,14 +323,13 @@ fn run_analyze(repo_path: Option<PathBuf>, verbose: bool, ai: bool) -> ExitCode 
             eprintln!("Supported providers: claude (ANTHROPIC_API_KEY), openai (OPENAI_API_KEY), local (OLLAMA_BASE_URL)");
             return ExitCode::FAILURE;
         }
-        
+
         let provider = create_provider_with_fallback(&ai_config);
         let rt = Runtime::new().expect("Failed to create Tokio runtime");
-        
-        let analysis = rt.block_on(async {
-            analyze_hunks(&diffs, &ai_config, provider.as_ref()).await
-        });
-        
+
+        let analysis =
+            rt.block_on(async { analyze_hunks(&diffs, &ai_config, provider.as_ref()).await });
+
         match analysis {
             Ok(diff_analysis) => {
                 print_ai_analysis(&diff_analysis);
@@ -340,7 +342,7 @@ fn run_analyze(repo_path: Option<PathBuf>, verbose: bool, ai: bool) -> ExitCode 
             }
         }
     }
-    
+
     for file in &files {
         let label = match file.change_kind {
             ChangeKind::Added => "Added",
@@ -362,7 +364,7 @@ fn run_analyze(repo_path: Option<PathBuf>, verbose: bool, ai: bool) -> ExitCode 
         }
         println!();
     }
-    
+
     ExitCode::SUCCESS
 }
 
@@ -396,7 +398,7 @@ fn run_analyze(repo_path: Option<PathBuf>, verbose: bool, _ai: bool) -> ExitCode
 
     println!("Staged changes: {}", files.len());
     println!();
-    
+
     for file in &files {
         let label = match file.change_kind {
             ChangeKind::Added => "Added",
@@ -418,7 +420,7 @@ fn run_analyze(repo_path: Option<PathBuf>, verbose: bool, _ai: bool) -> ExitCode
         }
         println!();
     }
-    
+
     ExitCode::SUCCESS
 }
 
@@ -526,10 +528,7 @@ fn build_preview(
     let messages = match messages_file {
         Some(file) => {
             let text = fs::read_to_string(file).map_err(|err| {
-                eprintln!(
-                    "Could not read messages file {}: {err}",
-                    file.display()
-                );
+                eprintln!("Could not read messages file {}: {err}", file.display());
                 ExitCode::FAILURE
             })?;
             text.parse::<CommitMessages>().map_err(|err| {
@@ -544,40 +543,44 @@ fn build_preview(
         None => {
             // Auto-generate messages using AI
             let ai_config = load_ai_config_from_env();
-            
+
             // Validate AI configuration
             if let Err(e) = validate_ai_config(&ai_config) {
                 eprintln!("AI configuration error: {e}");
-                eprintln!("Please set the required environment variables for your chosen provider.");
+                eprintln!(
+                    "Please set the required environment variables for your chosen provider."
+                );
                 eprintln!("Supported providers: claude (ANTHROPIC_API_KEY), openai (OPENAI_API_KEY), local (OLLAMA_BASE_URL)");
                 return Err(ExitCode::FAILURE);
             }
-            
+
             // Create provider with fallback
             let provider = create_provider_with_fallback(&ai_config);
-            
+
             // Generate messages using AI
             let rt = Runtime::new().map_err(|e| {
                 eprintln!("Failed to create async runtime: {e}");
                 ExitCode::FAILURE
             })?;
-            
+
             let generated = rt.block_on(async {
                 generate_commit_messages(&diffs, &files, &ai_config, provider.as_ref()).await
             });
-            
+
             let generated_messages = generated.map_err(|e| {
                 eprintln!("Failed to generate commit messages: {e}");
-                eprintln!("You can provide a messages file manually using --messages-file instead.");
+                eprintln!(
+                    "You can provide a messages file manually using --messages-file instead."
+                );
                 ExitCode::FAILURE
             })?;
-            
+
             // Convert Vec<String> to CommitMessages
             let commit_messages: Vec<smartcommit_core::CommitMessage> = generated_messages
                 .into_iter()
                 .map(|text| smartcommit_core::CommitMessage { text })
                 .collect();
-            
+
             CommitMessages(commit_messages)
         }
     };
@@ -990,13 +993,13 @@ fn print_ai_analysis(analysis: &smartcommit_core::ai::DiffAnalysis) {
     println!("  Complexity: {}/10", analysis.overall_complexity);
     println!("  Risk Level: {:?}", analysis.overall_risk);
     println!();
-    
+
     println!("Recommendations:");
     for recommendation in &analysis.recommendations {
         println!("  - {}", recommendation);
     }
     println!();
-    
+
     println!("Suggested Commit Groupings:");
     for (i, group) in analysis.suggested_groups.iter().enumerate() {
         println!("  Group {}:", i + 1);
@@ -1005,7 +1008,7 @@ fn print_ai_analysis(analysis: &smartcommit_core::ai::DiffAnalysis) {
         }
     }
     println!();
-    
+
     println!("Hunk-Level Analysis:");
     for hunk_analysis in &analysis.hunk_analyses {
         println!("  {}:", hunk_analysis.hunk_id);
@@ -1099,5 +1102,3 @@ fn safety_label(safety: RepositorySafety) -> &'static str {
         RepositorySafety::Blocked => "blocked",
     }
 }
-
-

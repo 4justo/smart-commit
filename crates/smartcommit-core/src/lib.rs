@@ -54,10 +54,12 @@ pub use timeline::{
 // AI exports (only available when ai feature is enabled)
 #[cfg(feature = "ai")]
 pub use ai::{
-    analyze_hunks, create_provider, create_provider_with_fallback, generate_commit_messages,
-    load_ai_config_from_env, validate_ai_config, AIConfig, AIProvider, ChangeCategory, DiffAnalysis,
-    GenerationError, HunkAnalysis, HunkAnalysisError, MessageRequest, MessageResponse, ModelSelection,
-    ProviderType, RiskLevel,
+    analyze_changes_semantically, analyze_hunks, create_provider, create_provider_with_fallback,
+    generate_commit_messages, load_ai_config_from_env, validate_ai_config, AIConfig, AIProvider,
+    AISemanticAnalysis, ChangeCategory, CombinedResult, DeterministicAnalysis,
+    DeterministicCategory, DiffAnalysis, GenerationError, HunkAnalysis, HunkAnalysisError,
+    MessageRequest, MessageResponse, ModelSelection, ProviderType, RiskLevel, SemanticAnalysis,
+    SemanticAnalysisError, SemanticCategory,
 };
 
 // Re-exported so downstream crates (smartcommit-cli and later

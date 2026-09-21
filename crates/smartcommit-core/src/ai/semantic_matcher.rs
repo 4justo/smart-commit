@@ -1,39 +1,46 @@
 //! AI-powered semantic file-to-commit matching.
 
-use super::provider::{AIProvider, MessageRequest, ProviderError};
+#[cfg(feature = "ai")]
 use super::config::AIConfig;
+#[cfg(feature = "ai")]
+use super::provider::{AIProvider, MessageRequest, ProviderError};
+#[cfg(feature = "ai")]
 use crate::{ChangedFile, CommitMessage, FileDiff};
+#[cfg(feature = "ai")]
 use thiserror::Error;
 
+#[cfg(feature = "ai")]
 /// Error types for semantic matching.
 #[derive(Error, Debug)]
 pub enum SemanticMatchError {
     #[error("Provider error: {0}")]
     ProviderError(#[from] ProviderError),
-    
+
     #[error("No files or messages provided")]
     NoInput,
-    
+
     #[error("AI response parsing failed: {0}")]
     ResponseParsingFailed(String),
-    
+
     #[error("Invalid match assignment: {0}")]
     InvalidAssignment(String),
 }
 
+#[cfg(feature = "ai")]
 /// Result of semantic file-to-commit matching.
 #[derive(Debug, Clone)]
 pub struct SemanticMatchResult {
     /// Message index -> list of file indices that belong to this commit.
     pub assignments: Vec<Vec<usize>>,
-    
+
     /// Files that couldn't be confidently assigned (indices).
     pub unassigned: Vec<usize>,
-    
+
     /// Confidence scores for each assignment (0.0 - 1.0).
     pub confidences: Vec<f32>,
 }
 
+#[cfg(feature = "ai")]
 /// Use AI to semantically match files to commit messages.
 pub async fn semantic_file_matching(
     messages: &[CommitMessage],
@@ -45,23 +52,24 @@ pub async fn semantic_file_matching(
     if messages.is_empty() || files.is_empty() {
         return Err(SemanticMatchError::NoInput);
     }
-    
+
     let context = build_matching_context(messages, files, diffs);
     let system_prompt = build_semantic_matching_system_prompt();
     let user_prompt = build_semantic_matching_user_prompt(&context);
-    
+
     let request = MessageRequest {
         system_prompt,
         user_prompt,
         max_tokens: Some(2048), // Need more tokens for complex matching
         temperature: Some(0.3), // Lower temperature for more deterministic results
     };
-    
+
     let response = provider.generate_message(&request).await?;
-    
+
     parse_semantic_response(&response.content, messages.len(), files.len())
 }
 
+#[cfg(feature = "ai")]
 /// Build context for semantic matching.
 fn build_matching_context(
     messages: &[CommitMessage],
@@ -69,28 +77,29 @@ fn build_matching_context(
     diffs: &[FileDiff],
 ) -> String {
     let mut context = String::new();
-    
+
     context.push_str("COMMIT MESSAGES:\n");
     for (i, msg) in messages.iter().enumerate() {
         context.push_str(&format!("{}. {}\n", i + 1, msg.text));
     }
-    
+
     context.push_str("\nFILES:\n");
     for (i, file) in files.iter().enumerate() {
         context.push_str(&format!("{}. {}\n", i + 1, file.path.display()));
-        
+
         match &file.change_kind {
             crate::ChangeKind::Added => context.push_str("   Status: Added\n"),
             crate::ChangeKind::Modified => context.push_str("   Status: Modified\n"),
             crate::ChangeKind::Deleted => context.push_str("   Status: Deleted\n"),
             crate::ChangeKind::Renamed => context.push_str("   Status: Renamed\n"),
         }
-        
+
         // Add relevant diff content if available
         if let Some(diff) = diffs.iter().find(|d| d.path == file.path) {
             if !diff.hunks.is_empty() {
                 context.push_str("   Sample changes:\n");
-                for hunk in diff.hunks.iter().take(2) { // Limit to avoid overwhelming context
+                for hunk in diff.hunks.iter().take(2) {
+                    // Limit to avoid overwhelming context
                     for line in hunk.lines.iter().take(5) {
                         match line {
                             crate::DiffLine::Added(content) => {
@@ -108,10 +117,11 @@ fn build_matching_context(
             }
         }
     }
-    
+
     context
 }
 
+#[cfg(feature = "ai")]
 /// Build system prompt for semantic matching.
 fn build_semantic_matching_system_prompt() -> String {
     r#"You are an expert at understanding code changes and their semantic relationships.
@@ -139,9 +149,11 @@ confidence: 0.7
 
 For files that don't clearly belong to any message, include them in a final line:
 unassigned: file_indices
-confidence: 0.3"#.to_string()
+confidence: 0.3"#
+        .to_string()
 }
 
+#[cfg(feature = "ai")]
 /// Build user prompt for semantic matching.
 fn build_semantic_matching_user_prompt(context: &str) -> String {
     format!(
@@ -150,6 +162,7 @@ fn build_semantic_matching_user_prompt(context: &str) -> String {
     )
 }
 
+#[cfg(feature = "ai")]
 /// Parse the AI response into semantic match results.
 fn parse_semantic_response(
     response: &str,
@@ -159,12 +172,12 @@ fn parse_semantic_response(
     let mut assignments: Vec<Vec<usize>> = vec![Vec::new(); message_count];
     let mut unassigned: Vec<usize> = Vec::new();
     let mut confidences: Vec<f32> = vec![0.0; message_count];
-    
+
     let mut current_message: Option<usize> = None;
-    
+
     for line in response.lines() {
         let line = line.trim();
-        
+
         if line.starts_with("unassigned:") {
             let files_str = line.strip_prefix("unassigned:").unwrap().trim();
             if !files_str.is_empty() {
@@ -175,7 +188,7 @@ fn parse_semantic_response(
             if parts.len() >= 2 {
                 let key = parts[0].trim();
                 let value = parts[1].trim();
-                
+
                 if key == "confidence" {
                     if let Some(msg_idx) = current_message {
                         let confidence = value.parse::<f32>().unwrap_or(0.5);
@@ -195,7 +208,7 @@ fn parse_semantic_response(
             }
         }
     }
-    
+
     Ok(SemanticMatchResult {
         assignments,
         unassigned,
@@ -206,7 +219,7 @@ fn parse_semantic_response(
 /// Parse comma-separated file indices.
 fn parse_file_indices(input: &str, max_index: usize) -> Result<Vec<usize>, SemanticMatchError> {
     let mut indices = Vec::new();
-    
+
     for part in input.split(',') {
         let part = part.trim();
         if let Ok(idx) = part.parse::<usize>() {
@@ -215,10 +228,11 @@ fn parse_file_indices(input: &str, max_index: usize) -> Result<Vec<usize>, Seman
             }
         }
     }
-    
+
     Ok(indices)
 }
 
+#[cfg(feature = "ai")]
 /// Hybrid approach: combine AI semantic matching with keyword matching as fallback.
 pub async fn hybrid_file_matching(
     messages: &[CommitMessage],
@@ -233,7 +247,10 @@ pub async fn hybrid_file_matching(
         Err(e) => {
             if config.generation.fallback_to_keywords {
                 // Fallback to keyword matching on AI failure
-                eprintln!("AI matching failed, falling back to keyword matching: {}", e);
+                eprintln!(
+                    "AI matching failed, falling back to keyword matching: {}",
+                    e
+                );
                 Ok(keyword_matching_fallback(messages, files, diffs))
             } else {
                 Err(e)
@@ -242,6 +259,7 @@ pub async fn hybrid_file_matching(
     }
 }
 
+#[cfg(feature = "ai")]
 /// Fallback to original keyword matching.
 fn keyword_matching_fallback(
     messages: &[CommitMessage],
@@ -250,31 +268,33 @@ fn keyword_matching_fallback(
 ) -> SemanticMatchResult {
     // Use the existing keyword matcher from the core crate
     let scores = crate::match_files_to_messages(messages, files, diffs);
-    
+
     let message_count = messages.len();
     let mut assignments: Vec<Vec<usize>> = vec![Vec::new(); message_count];
     let mut unassigned: Vec<usize> = Vec::new();
     let mut confidences: Vec<f32> = vec![0.0; message_count];
-    
+
     // Simple assignment: assign each file to its highest-scoring message
     for file_idx in 0..files.len() {
         let mut best_message: Option<usize> = None;
         let mut best_score: f32 = 0.0;
-        
+
         for msg_idx in 0..message_count {
-            let score = scores.iter()
+            let score = scores
+                .iter()
                 .find(|s| s.message_id == msg_idx && s.file_id == file_idx)
                 .map(|s| s.score)
                 .unwrap_or(0.0);
-            
+
             if score > best_score {
                 best_score = score;
                 best_message = Some(msg_idx);
             }
         }
-        
+
         if let Some(msg_idx) = best_message {
-            if best_score > 0.3 { // Minimum confidence threshold
+            if best_score > 0.3 {
+                // Minimum confidence threshold
                 assignments[msg_idx].push(file_idx);
                 confidences[msg_idx] = confidences[msg_idx].max(best_score);
             } else {
@@ -284,7 +304,7 @@ fn keyword_matching_fallback(
             unassigned.push(file_idx);
         }
     }
-    
+
     SemanticMatchResult {
         assignments,
         unassigned,
