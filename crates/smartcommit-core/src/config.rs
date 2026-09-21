@@ -391,8 +391,7 @@ mod tests {
     }
 
     fn write_config(dir: &Path, content: &str) {
-        fs::write(dir.join(".smc.toml"), content)
-            .expect("failed to write .smc.toml in temp dir");
+        fs::write(dir.join(".smc.toml"), content).expect("failed to write .smc.toml in temp dir");
     }
 
     // ── Happy-path tests ──────────────────────────────────────────────────────
