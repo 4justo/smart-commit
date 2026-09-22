@@ -11,6 +11,7 @@ mod executor;
 mod matcher;
 mod message_parser;
 mod operation_record;
+mod parser;
 mod planner;
 mod repository;
 mod repository_state;
@@ -26,7 +27,7 @@ pub use checkpoint::{create_safety_checkpoint, CheckpointError, SafetyCheckpoint
 pub use config::{
     load_config, CommitConfig, ConfigError, MatchingConfig, SmartCommitConfig, TimelineConfig,
 };
-pub use diff::{get_staged_diffs, DiffError, DiffHunk, DiffLine, FileDiff};
+pub use diff::{get_staged_diffs, DiffError, DiffHunk, DiffLine, FileDiff, StructureInfo, StructureKind};
 pub use executor::{
     execute_commit_plan, CompletedCommit, ExecutionError, ExecutionFailure, ExecutionReport,
 };
@@ -44,6 +45,7 @@ pub use repository_state::{
 pub use restore::{
     execute_restore, manual_recovery_instructions, plan_restore, RestoreError, RestorePlan,
 };
+pub use parser::{detect_language, find_structure_at_line, parse_file_structures};
 pub use staged_changes::{get_staged_changes, ChangeKind, ChangedFile, StagedChangesError};
 pub use timeline::{
     apply_timeline_to_plan, generate_timeline, ApplyTimelineError, PlannedCommitTime, RandomSource,
