@@ -222,8 +222,104 @@ fn extract_impl_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
 // Placeholder implementations for other languages
 // These will be implemented in subsequent sections
 
+#[cfg(feature = "tree-sitter-python")]
+fn parse_python_structures(content: &str) -> Option<Vec<StructureInfo>> {
+    use tree_sitter::Parser;
+    
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_python::language())
+        .ok()?;
+    
+    let tree = parser.parse(content, None)?;
+    let root_node = tree.root_node();
+    
+    let mut structures = Vec::new();
+    extract_python_nodes(&root_node, content, &mut structures);
+    
+    Some(structures)
+}
+
+#[cfg(not(feature = "tree-sitter-python"))]
 fn parse_python_structures(_content: &str) -> Option<Vec<StructureInfo>> {
-    // TODO: Implement Python parser in Section 2
+    None
+}
+
+#[cfg(feature = "tree-sitter-python")]
+fn extract_python_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>) {
+    match node.kind() {
+        "function_definition" => {
+            if let Some(name) = extract_python_function_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Function,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "python".to_string(),
+                });
+            }
+        }
+        "class_definition" => {
+            if let Some(name) = extract_python_class_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Class,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "python".to_string(),
+                });
+            }
+        }
+        "module" => {
+            // Python modules are typically the file itself, but we can track imports
+            if let Some(name) = extract_python_module_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Module,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "python".to_string(),
+                });
+            }
+        }
+        _ => {}
+    }
+    
+    // Recursively process children
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        extract_python_nodes(&child, source, structures);
+    }
+}
+
+#[cfg(feature = "tree-sitter-python")]
+fn extract_python_function_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-python")]
+fn extract_python_class_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-python")]
+fn extract_python_module_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    // For import statements, extract the module name
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "dotted_name" || child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
     None
 }
 
@@ -276,6 +372,7 @@ mod tests {
         assert_eq!(detect_language(Path::new("test.unknown")), "unknown");
     }
 
+    #[cfg(feature = "tree-sitter-rust")]
     #[test]
     fn test_parse_rust_function() {
         let code = r#"
@@ -295,6 +392,7 @@ fn validate_token(token: &str) -> bool {
         assert_eq!(func.language, "rust");
     }
 
+    #[cfg(feature = "tree-sitter-rust")]
     #[test]
     fn test_parse_rust_struct() {
         let code = r#"
@@ -315,6 +413,7 @@ struct User {
         assert_eq!(struct_info.language, "rust");
     }
 
+    #[cfg(feature = "tree-sitter-rust")]
     #[test]
     fn test_parse_rust_enum() {
         let code = r#"
@@ -335,6 +434,7 @@ enum Status {
         assert_eq!(enum_info.language, "rust");
     }
 
+    #[cfg(feature = "tree-sitter-rust")]
     #[test]
     fn test_parse_rust_trait() {
         let code = r#"
@@ -354,6 +454,7 @@ trait Validator {
         assert_eq!(trait_info.language, "rust");
     }
 
+    #[cfg(feature = "tree-sitter-rust")]
     #[test]
     fn test_parse_rust_module() {
         let code = r#"
@@ -401,5 +502,44 @@ mod auth {
             Some(&"func2".to_string())
         );
         assert!(find_structure_at_line(&structures, 30).is_none());
+    }
+
+    #[cfg(feature = "tree-sitter-python")]
+    #[test]
+    fn test_parse_python_function() {
+        let code = r#"
+def validate_token(token: str) -> bool:
+    return len(token) > 0
+"#;
+        
+        let structures = parse_python_structures(code);
+        assert!(structures.is_some());
+        let structures = structures.unwrap();
+        assert!(!structures.is_empty());
+        
+        let func = &structures[0];
+        assert_eq!(func.name, "validate_token");
+        assert_eq!(func.kind, StructureKind::Function);
+        assert_eq!(func.language, "python");
+    }
+
+    #[cfg(feature = "tree-sitter-python")]
+    #[test]
+    fn test_parse_python_class() {
+        let code = r#"
+class User:
+    def __init__(self, name: str):
+        self.name = name
+"#;
+        
+        let structures = parse_python_structures(code);
+        assert!(structures.is_some());
+        let structures = structures.unwrap();
+        assert!(!structures.is_empty());
+        
+        let class_info = &structures[0];
+        assert_eq!(class_info.name, "User");
+        assert_eq!(class_info.kind, StructureKind::Class);
+        assert_eq!(class_info.language, "python");
     }
 }
