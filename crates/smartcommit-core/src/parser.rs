@@ -501,8 +501,136 @@ fn extract_javascript_import_export_name(node: &tree_sitter::Node, source: &str)
     None
 }
 
+#[cfg(feature = "tree-sitter-php")]
+fn parse_php_structures(content: &str) -> Option<Vec<StructureInfo>> {
+    use tree_sitter::Parser;
+    
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_php::language_php())
+        .ok()?;
+    
+    let tree = parser.parse(content, None)?;
+    let root_node = tree.root_node();
+    
+    let mut structures = Vec::new();
+    extract_php_nodes(&root_node, content, &mut structures);
+    
+    Some(structures)
+}
+
+#[cfg(not(feature = "tree-sitter-php"))]
 fn parse_php_structures(_content: &str) -> Option<Vec<StructureInfo>> {
-    // TODO: Implement PHP parser in Section 4
+    None
+}
+
+#[cfg(feature = "tree-sitter-php")]
+fn extract_php_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>) {
+    match node.kind() {
+        "function_definition" => {
+            if let Some(name) = extract_php_function_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Function,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "php".to_string(),
+                });
+            }
+        }
+        "class_declaration" => {
+            if let Some(name) = extract_php_class_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Class,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "php".to_string(),
+                });
+            }
+        }
+        "method_declaration" => {
+            if let Some(name) = extract_php_method_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Method,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "php".to_string(),
+                });
+            }
+        }
+        "interface_declaration" => {
+            if let Some(name) = extract_php_interface_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Interface,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "php".to_string(),
+                });
+            }
+        }
+        _ => {}
+    }
+    
+    // Recursively process children
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        extract_php_nodes(&child, source, structures);
+    }
+}
+
+#[cfg(feature = "tree-sitter-php")]
+fn extract_php_function_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "name" {
+            return Some(source[child.byte_range()].to_string());
+        }
+        // Also try direct identifier
+        if child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-php")]
+fn extract_php_class_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "name" {
+            return Some(source[child.byte_range()].to_string());
+        }
+        if child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-php")]
+fn extract_php_method_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "name" {
+            return Some(source[child.byte_range()].to_string());
+        }
+        if child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-php")]
+fn extract_php_interface_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "name" {
+            return Some(source[child.byte_range()].to_string());
+        }
+        if child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
     None
 }
 
@@ -797,5 +925,72 @@ interface User {
         assert_eq!(interface_info.name, "User");
         assert_eq!(interface_info.kind, StructureKind::Interface);
         assert_eq!(interface_info.language, "typescript");
+    }
+
+    #[cfg(feature = "tree-sitter-php")]
+    #[test]
+    fn test_parse_php_function() {
+        let code = r#"
+<?php
+function validateToken($token) {
+    return strlen($token) > 0;
+}
+"#;
+        
+        let structures = parse_php_structures(code);
+        assert!(structures.is_some());
+        let structures = structures.unwrap();
+        assert!(!structures.is_empty());
+        
+        let func = &structures[0];
+        assert_eq!(func.name, "validateToken");
+        assert_eq!(func.kind, StructureKind::Function);
+        assert_eq!(func.language, "php");
+    }
+
+    #[cfg(feature = "tree-sitter-php")]
+    #[test]
+    fn test_parse_php_class() {
+        let code = r#"
+<?php
+class User {
+    public $name;
+    
+    public function __construct($name) {
+        $this->name = $name;
+    }
+}
+"#;
+        
+        let structures = parse_php_structures(code);
+        assert!(structures.is_some());
+        let structures = structures.unwrap();
+        assert!(!structures.is_empty());
+        
+        let class_info = &structures[0];
+        assert_eq!(class_info.name, "User");
+        assert_eq!(class_info.kind, StructureKind::Class);
+        assert_eq!(class_info.language, "php");
+    }
+
+    #[cfg(feature = "tree-sitter-php")]
+    #[test]
+    fn test_parse_php_interface() {
+        let code = r#"
+<?php
+interface Validator {
+    public function validate($value): bool;
+}
+"#;
+        
+        let structures = parse_php_structures(code);
+        assert!(structures.is_some());
+        let structures = structures.unwrap();
+        assert!(!structures.is_empty());
+        
+        let interface_info = &structures[0];
+        assert_eq!(interface_info.name, "Validator");
+        assert_eq!(interface_info.kind, StructureKind::Interface);
+        assert_eq!(interface_info.language, "php");
     }
 }
