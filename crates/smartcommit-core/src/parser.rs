@@ -634,23 +634,544 @@ fn extract_php_interface_name(node: &tree_sitter::Node, source: &str) -> Option<
     None
 }
 
+#[cfg(feature = "tree-sitter-java")]
+fn parse_java_structures(content: &str) -> Option<Vec<StructureInfo>> {
+    use tree_sitter::Parser;
+    
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_java::language())
+        .ok()?;
+    
+    let tree = parser.parse(content, None)?;
+    let root_node = tree.root_node();
+    
+    let mut structures = Vec::new();
+    extract_java_nodes(&root_node, content, &mut structures);
+    
+    Some(structures)
+}
+
+#[cfg(not(feature = "tree-sitter-java"))]
 fn parse_java_structures(_content: &str) -> Option<Vec<StructureInfo>> {
-    // TODO: Implement Java parser in Section 5
     None
 }
 
+#[cfg(feature = "tree-sitter-java")]
+fn extract_java_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>) {
+    match node.kind() {
+        "method_declaration" => {
+            if let Some(name) = extract_java_method_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Method,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "java".to_string(),
+                });
+            }
+        }
+        "class_declaration" => {
+            if let Some(name) = extract_java_class_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Class,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "java".to_string(),
+                });
+            }
+        }
+        "interface_declaration" => {
+            if let Some(name) = extract_java_interface_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Interface,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "java".to_string(),
+                });
+            }
+        }
+        _ => {}
+    }
+    
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        extract_java_nodes(&child, source, structures);
+    }
+}
+
+#[cfg(feature = "tree-sitter-java")]
+fn extract_java_method_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-java")]
+fn extract_java_class_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-java")]
+fn extract_java_interface_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-c-sharp")]
+fn parse_csharp_structures(content: &str) -> Option<Vec<StructureInfo>> {
+    use tree_sitter::Parser;
+    
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_c_sharp::language())
+        .ok()?;
+    
+    let tree = parser.parse(content, None)?;
+    let root_node = tree.root_node();
+    
+    let mut structures = Vec::new();
+    extract_csharp_nodes(&root_node, content, &mut structures);
+    
+    Some(structures)
+}
+
+#[cfg(not(feature = "tree-sitter-c-sharp"))]
 fn parse_csharp_structures(_content: &str) -> Option<Vec<StructureInfo>> {
-    // TODO: Implement C# parser in Section 6
     None
 }
 
+#[cfg(feature = "tree-sitter-c-sharp")]
+fn extract_csharp_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>) {
+    match node.kind() {
+        "method_declaration" => {
+            if let Some(name) = extract_csharp_method_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Method,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "csharp".to_string(),
+                });
+            }
+        }
+        "class_declaration" => {
+            if let Some(name) = extract_csharp_class_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Class,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "csharp".to_string(),
+                });
+            }
+        }
+        "interface_declaration" => {
+            if let Some(name) = extract_csharp_interface_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Interface,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "csharp".to_string(),
+                });
+            }
+        }
+        _ => {}
+    }
+    
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        extract_csharp_nodes(&child, source, structures);
+    }
+}
+
+#[cfg(feature = "tree-sitter-c-sharp")]
+fn extract_csharp_method_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-c-sharp")]
+fn extract_csharp_class_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-c-sharp")]
+fn extract_csharp_interface_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-go")]
+fn parse_go_structures(content: &str) -> Option<Vec<StructureInfo>> {
+    use tree_sitter::Parser;
+    
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_go::language())
+        .ok()?;
+    
+    let tree = parser.parse(content, None)?;
+    let root_node = tree.root_node();
+    
+    let mut structures = Vec::new();
+    extract_go_nodes(&root_node, content, &mut structures);
+    
+    Some(structures)
+}
+
+#[cfg(not(feature = "tree-sitter-go"))]
 fn parse_go_structures(_content: &str) -> Option<Vec<StructureInfo>> {
-    // TODO: Implement Go parser in Section 7
     None
 }
 
+#[cfg(feature = "tree-sitter-go")]
+fn extract_go_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>) {
+    match node.kind() {
+        "function_declaration" => {
+            if let Some(name) = extract_go_function_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Function,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "go".to_string(),
+                });
+            }
+        }
+        "method_declaration" => {
+            if let Some(name) = extract_go_method_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Method,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "go".to_string(),
+                });
+            }
+        }
+        "struct_type" => {
+            if let Some(name) = extract_go_struct_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Struct,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "go".to_string(),
+                });
+            }
+        }
+        "interface_type" => {
+            if let Some(name) = extract_go_interface_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Interface,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "go".to_string(),
+                });
+            }
+        }
+        _ => {}
+    }
+    
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        extract_go_nodes(&child, source, structures);
+    }
+}
+
+#[cfg(feature = "tree-sitter-go")]
+fn extract_go_function_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-go")]
+fn extract_go_method_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-go")]
+fn extract_go_struct_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "type_identifier" || child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-go")]
+fn extract_go_interface_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "type_identifier" || child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-c")]
+fn parse_c_structures(content: &str) -> Option<Vec<StructureInfo>> {
+    use tree_sitter::Parser;
+    
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_c::language())
+        .ok()?;
+    
+    let tree = parser.parse(content, None)?;
+    let root_node = tree.root_node();
+    
+    let mut structures = Vec::new();
+    extract_c_nodes(&root_node, content, &mut structures);
+    
+    Some(structures)
+}
+
+#[cfg(not(feature = "tree-sitter-c"))]
 fn parse_c_structures(_content: &str) -> Option<Vec<StructureInfo>> {
-    // TODO: Implement C/C++ parser in Section 8
+    None
+}
+
+#[cfg(feature = "tree-sitter-c")]
+fn extract_c_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>) {
+    match node.kind() {
+        "function_definition" => {
+            if let Some(name) = extract_c_function_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Function,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "c".to_string(),
+                });
+            }
+        }
+        "struct_specifier" => {
+            if let Some(name) = extract_c_struct_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Struct,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "c".to_string(),
+                });
+            }
+        }
+        "enum_specifier" => {
+            if let Some(name) = extract_c_enum_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Enum,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "c".to_string(),
+                });
+            }
+        }
+        _ => {}
+    }
+    
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        extract_c_nodes(&child, source, structures);
+    }
+}
+
+#[cfg(feature = "tree-sitter-c")]
+fn extract_c_function_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    // C function names are often in a declarator node
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+        // Also check in declarator
+        if child.kind() == "function_declarator" || child.kind() == "declarator" {
+            for subchild in child.children(&mut child.walk()) {
+                if subchild.kind() == "identifier" {
+                    return Some(source[subchild.byte_range()].to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-c")]
+fn extract_c_struct_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "type_identifier" || child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-c")]
+fn extract_c_enum_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "type_identifier" || child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-cpp")]
+fn parse_cpp_structures(content: &str) -> Option<Vec<StructureInfo>> {
+    use tree_sitter::Parser;
+    
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_cpp::language())
+        .ok()?;
+    
+    let tree = parser.parse(content, None)?;
+    let root_node = tree.root_node();
+    
+    let mut structures = Vec::new();
+    extract_cpp_nodes(&root_node, content, &mut structures);
+    
+    Some(structures)
+}
+
+#[cfg(not(feature = "tree-sitter-cpp"))]
+fn parse_cpp_structures(_content: &str) -> Option<Vec<StructureInfo>> {
+    None
+}
+
+#[cfg(feature = "tree-sitter-cpp")]
+fn extract_cpp_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>) {
+    match node.kind() {
+        "function_definition" => {
+            if let Some(name) = extract_cpp_function_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Function,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "cpp".to_string(),
+                });
+            }
+        }
+        "class_specifier" => {
+            if let Some(name) = extract_cpp_class_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Class,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "cpp".to_string(),
+                });
+            }
+        }
+        "struct_specifier" => {
+            if let Some(name) = extract_cpp_struct_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Struct,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "cpp".to_string(),
+                });
+            }
+        }
+        "enum_specifier" => {
+            if let Some(name) = extract_cpp_enum_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Enum,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: "cpp".to_string(),
+                });
+            }
+        }
+        _ => {}
+    }
+    
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        extract_cpp_nodes(&child, source, structures);
+    }
+}
+
+#[cfg(feature = "tree-sitter-cpp")]
+fn extract_cpp_function_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-cpp")]
+fn extract_cpp_class_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "type_identifier" || child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-cpp")]
+fn extract_cpp_struct_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "type_identifier" || child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(feature = "tree-sitter-cpp")]
+fn extract_cpp_enum_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "type_identifier" || child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
     None
 }
 
@@ -992,5 +1513,120 @@ interface Validator {
         assert_eq!(interface_info.name, "Validator");
         assert_eq!(interface_info.kind, StructureKind::Interface);
         assert_eq!(interface_info.language, "php");
+    }
+
+    #[cfg(feature = "tree-sitter-java")]
+    #[test]
+    fn test_parse_java_class() {
+        let code = r#"
+public class User {
+    private String name;
+    
+    public User(String name) {
+        this.name = name;
+    }
+}
+"#;
+        
+        let structures = parse_java_structures(code);
+        assert!(structures.is_some());
+        let structures = structures.unwrap();
+        assert!(!structures.is_empty());
+        
+        let class_info = &structures[0];
+        assert_eq!(class_info.name, "User");
+        assert_eq!(class_info.kind, StructureKind::Class);
+        assert_eq!(class_info.language, "java");
+    }
+
+    #[cfg(feature = "tree-sitter-c-sharp")]
+    #[test]
+    fn test_parse_csharp_class() {
+        let code = r#"
+public class User {
+    private string name;
+    
+    public User(string name) {
+        this.name = name;
+    }
+}
+"#;
+        
+        let structures = parse_csharp_structures(code);
+        assert!(structures.is_some());
+        let structures = structures.unwrap();
+        assert!(!structures.is_empty());
+        
+        let class_info = &structures[0];
+        assert_eq!(class_info.name, "User");
+        assert_eq!(class_info.kind, StructureKind::Class);
+        assert_eq!(class_info.language, "csharp");
+    }
+
+    #[cfg(feature = "tree-sitter-go")]
+    #[test]
+    fn test_parse_go_function() {
+        let code = r#"
+package main
+
+func validateToken(token string) bool {
+    return len(token) > 0
+}
+"#;
+        
+        let structures = parse_go_structures(code);
+        assert!(structures.is_some());
+        let structures = structures.unwrap();
+        assert!(!structures.is_empty());
+        
+        let func = &structures[0];
+        assert_eq!(func.name, "validateToken");
+        assert_eq!(func.kind, StructureKind::Function);
+        assert_eq!(func.language, "go");
+    }
+
+    #[cfg(feature = "tree-sitter-c")]
+    #[test]
+    fn test_parse_c_function() {
+        let code = r#"
+#include <stdio.h>
+
+int validate_token(const char* token) {
+    return strlen(token) > 0;
+}
+"#;
+        
+        let structures = parse_c_structures(code);
+        assert!(structures.is_some());
+        let structures = structures.unwrap();
+        assert!(!structures.is_empty());
+        
+        let func = &structures[0];
+        assert_eq!(func.name, "validate_token");
+        assert_eq!(func.kind, StructureKind::Function);
+        assert_eq!(func.language, "c");
+    }
+
+    #[cfg(feature = "tree-sitter-cpp")]
+    #[test]
+    fn test_parse_cpp_class() {
+        let code = r#"
+class User {
+private:
+    std::string name;
+public:
+    User(std::string name) : name(name) {}
+};
+"#;
+        
+        let structures = parse_cpp_structures(code);
+        assert!(structures.is_some());
+        let structures = structures.unwrap();
+        assert!(!structures.is_empty());
+        
+        let class_info = &structures[0];
+        assert_eq!(class_info.name, "User");
+        assert_eq!(class_info.kind, StructureKind::Class);
+        assert_eq!(class_info.language, "cpp");
     }
 }
