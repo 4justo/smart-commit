@@ -323,8 +323,181 @@ fn extract_python_module_name(node: &tree_sitter::Node, source: &str) -> Option<
     None
 }
 
+#[cfg(any(feature = "tree-sitter-javascript", feature = "tree-sitter-typescript"))]
+fn parse_javascript_structures(content: &str) -> Option<Vec<StructureInfo>> {
+    use tree_sitter::Parser;
+    
+    let mut parser = Parser::new();
+    
+    // Try TypeScript first if feature is enabled, fall back to JavaScript
+    #[cfg(feature = "tree-sitter-typescript")]
+    let lang_name = if parser.set_language(&tree_sitter_typescript::language_typescript()).is_ok() {
+        "typescript"
+    } else {
+        #[cfg(feature = "tree-sitter-javascript")]
+        {
+            parser.set_language(&tree_sitter_javascript::language()).ok()?;
+            "javascript"
+        }
+        #[cfg(not(feature = "tree-sitter-javascript"))]
+        {
+            return None;
+        }
+    };
+    
+    #[cfg(not(feature = "tree-sitter-typescript"))]
+    let lang_name = {
+        #[cfg(feature = "tree-sitter-javascript")]
+        {
+            parser.set_language(&tree_sitter_javascript::language()).ok()?;
+            "javascript"
+        }
+        #[cfg(not(feature = "tree-sitter-javascript"))]
+        {
+            return None;
+        }
+    };
+    
+    let tree = parser.parse(content, None)?;
+    let root_node = tree.root_node();
+    
+    let mut structures = Vec::new();
+    extract_javascript_nodes(&root_node, content, &mut structures, lang_name);
+    
+    Some(structures)
+}
+
+#[cfg(not(any(feature = "tree-sitter-javascript", feature = "tree-sitter-typescript")))]
 fn parse_javascript_structures(_content: &str) -> Option<Vec<StructureInfo>> {
-    // TODO: Implement JavaScript/TypeScript parser in Section 3
+    None
+}
+
+#[cfg(any(feature = "tree-sitter-javascript", feature = "tree-sitter-typescript"))]
+fn extract_javascript_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>, lang_name: &str) {
+    match node.kind() {
+        "function_declaration" | "function_expression" | "arrow_function" => {
+            if let Some(name) = extract_javascript_function_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Function,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: lang_name.to_string(),
+                });
+            }
+        }
+        "class_declaration" | "class_expression" => {
+            if let Some(name) = extract_javascript_class_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Class,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: lang_name.to_string(),
+                });
+            }
+        }
+        "method_definition" => {
+            if let Some(name) = extract_javascript_method_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Method,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: lang_name.to_string(),
+                });
+            }
+        }
+        "interface_declaration" => {
+            if let Some(name) = extract_javascript_interface_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: StructureKind::Interface,
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: lang_name.to_string(),
+                });
+            }
+        }
+        "import_statement" | "export_statement" => {
+            // Track imports/exports as structure info
+            if let Some(name) = extract_javascript_import_export_name(node, source) {
+                structures.push(StructureInfo {
+                    name,
+                    kind: if node.kind() == "import_statement" {
+                        StructureKind::Import
+                    } else {
+                        StructureKind::Export
+                    },
+                    start_line: node.start_position().row + 1,
+                    end_line: node.end_position().row + 1,
+                    language: lang_name.to_string(),
+                });
+            }
+        }
+        _ => {}
+    }
+    
+    // Recursively process children
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        extract_javascript_nodes(&child, source, structures, lang_name);
+    }
+}
+
+#[cfg(any(feature = "tree-sitter-javascript", feature = "tree-sitter-typescript"))]
+fn extract_javascript_function_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(any(feature = "tree-sitter-javascript", feature = "tree-sitter-typescript"))]
+fn extract_javascript_class_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(any(feature = "tree-sitter-javascript", feature = "tree-sitter-typescript"))]
+fn extract_javascript_method_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "property_identifier" || child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(any(feature = "tree-sitter-javascript", feature = "tree-sitter-typescript"))]
+fn extract_javascript_interface_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "type_identifier" || child.kind() == "identifier" {
+            return Some(source[child.byte_range()].to_string());
+        }
+    }
+    None
+}
+
+#[cfg(any(feature = "tree-sitter-javascript", feature = "tree-sitter-typescript"))]
+fn extract_javascript_import_export_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    // Extract the module or identifier being imported/exported
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "string" || child.kind() == "identifier" {
+            let text = source[child.byte_range()].to_string();
+            // Clean up quotes from string literals
+            if text.starts_with('"') || text.starts_with('\'') {
+                return Some(text.trim_matches('"').trim_matches('\'').to_string());
+            }
+            return Some(text);
+        }
+    }
     None
 }
 
@@ -541,5 +714,88 @@ class User:
         assert_eq!(class_info.name, "User");
         assert_eq!(class_info.kind, StructureKind::Class);
         assert_eq!(class_info.language, "python");
+    }
+
+    #[cfg(feature = "tree-sitter-javascript")]
+    #[test]
+    fn test_parse_javascript_function() {
+        let code = r#"
+function validateToken(token) {
+    return token.length > 0;
+}
+"#;
+        
+        let structures = parse_javascript_structures(code);
+        assert!(structures.is_some());
+        let structures = structures.unwrap();
+        assert!(!structures.is_empty());
+        
+        let func = &structures[0];
+        assert_eq!(func.name, "validateToken");
+        assert_eq!(func.kind, StructureKind::Function);
+        assert_eq!(func.language, "javascript");
+    }
+
+    #[cfg(feature = "tree-sitter-javascript")]
+    #[test]
+    fn test_parse_javascript_class() {
+        let code = r#"
+class User {
+    constructor(name) {
+        this.name = name;
+    }
+}
+"#;
+        
+        let structures = parse_javascript_structures(code);
+        assert!(structures.is_some());
+        let structures = structures.unwrap();
+        assert!(!structures.is_empty());
+        
+        let class_info = &structures[0];
+        assert_eq!(class_info.name, "User");
+        assert_eq!(class_info.kind, StructureKind::Class);
+        assert_eq!(class_info.language, "javascript");
+    }
+
+    #[cfg(feature = "tree-sitter-typescript")]
+    #[test]
+    fn test_parse_typescript_function() {
+        let code = r#"
+function validateToken(token: string): boolean {
+    return token.length > 0;
+}
+"#;
+        
+        let structures = parse_javascript_structures(code);
+        assert!(structures.is_some());
+        let structures = structures.unwrap();
+        assert!(!structures.is_empty());
+        
+        let func = &structures[0];
+        assert_eq!(func.name, "validateToken");
+        assert_eq!(func.kind, StructureKind::Function);
+        assert_eq!(func.language, "typescript");
+    }
+
+    #[cfg(feature = "tree-sitter-typescript")]
+    #[test]
+    fn test_parse_typescript_interface() {
+        let code = r#"
+interface User {
+    name: string;
+    email: string;
+}
+"#;
+        
+        let structures = parse_javascript_structures(code);
+        assert!(structures.is_some());
+        let structures = structures.unwrap();
+        assert!(!structures.is_empty());
+        
+        let interface_info = &structures[0];
+        assert_eq!(interface_info.name, "User");
+        assert_eq!(interface_info.kind, StructureKind::Interface);
+        assert_eq!(interface_info.language, "typescript");
     }
 }
