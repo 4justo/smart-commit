@@ -306,6 +306,7 @@ mod tests {
                 lines,
                 raw_content: String::new(),
                 stats: Default::default(),
+                structure: None,
             }],
             additions: added_lines.len(),
             deletions: 0,
