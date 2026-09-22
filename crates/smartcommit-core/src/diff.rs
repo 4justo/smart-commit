@@ -17,6 +17,7 @@
 //! itself.
 
 use crate::{Repository, RepositoryError};
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -43,6 +44,55 @@ pub struct HunkStats {
     pub deletions: usize,
     pub context: usize,
     pub total_changed_lines: usize,
+}
+
+/// The kind of code structure detected in a file (Module 18).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StructureKind {
+    Function,
+    Method,
+    Class,
+    Struct,
+    Enum,
+    Interface,
+    Module,
+    Import,
+    Export,
+    Trait,
+    Unknown,
+}
+
+impl std::fmt::Display for StructureKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StructureKind::Function => write!(f, "function"),
+            StructureKind::Method => write!(f, "method"),
+            StructureKind::Class => write!(f, "class"),
+            StructureKind::Struct => write!(f, "struct"),
+            StructureKind::Enum => write!(f, "enum"),
+            StructureKind::Interface => write!(f, "interface"),
+            StructureKind::Module => write!(f, "module"),
+            StructureKind::Import => write!(f, "import"),
+            StructureKind::Export => write!(f, "export"),
+            StructureKind::Trait => write!(f, "trait"),
+            StructureKind::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
+/// Information about a code structure (Module 18).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructureInfo {
+    /// The name of the structure (e.g., "validate_token", "User", "auth")
+    pub name: String,
+    /// The kind of structure
+    pub kind: StructureKind,
+    /// The starting line number (1-based)
+    pub start_line: usize,
+    /// The ending line number (1-based)
+    pub end_line: usize,
+    /// The language of the file
+    pub language: String,
 }
 
 /// One `@@ ... @@` hunk within a file's diff.
@@ -82,6 +132,8 @@ pub struct DiffHunk {
     /// is not byte-for-byte preserved.
     pub raw_content: String,
     pub stats: HunkStats,
+    /// The code structure this hunk belongs to (Module 18)
+    pub structure: Option<StructureInfo>,
 }
 
 /// The staged diff for a single file.
@@ -136,7 +188,7 @@ pub fn get_staged_diffs(path: impl AsRef<std::path::Path>) -> Result<Vec<FileDif
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(parse_unified_diff(&stdout))
+    Ok(parse_unified_diff(&stdout, &repo.root))
 }
 
 /// Parses one `@@ -a[,b] +c[,d] @@ ...` header into
@@ -182,7 +234,7 @@ fn parse_range(spec: &str) -> Option<(usize, usize)> {
 /// the heuristic most diff parsers use and is not expected to cause
 /// problems in practice, but is not a byte-for-byte-safe parse of
 /// git's diff header for adversarial filenames.
-fn parse_unified_diff(diff_text: &str) -> Vec<FileDiff> {
+fn parse_unified_diff(diff_text: &str, repo_root: &std::path::Path) -> Vec<FileDiff> {
     let mut files = Vec::new();
     let mut current_file: Option<FileDiff> = None;
     // In-progress hunk state, kept separately from `DiffHunk` itself
@@ -194,11 +246,14 @@ fn parse_unified_diff(diff_text: &str) -> Vec<FileDiff> {
     // is what makes hunk IDs deterministic and stable regardless of
     // hunk content.
     let mut hunk_index_in_file: usize = 0;
+    // Structures for the current file
+    let mut current_structures: Vec<StructureInfo> = Vec::new();
 
     fn finalize_hunk(
         file: &mut Option<FileDiff>,
         hunk: &mut Option<(String, Vec<DiffLine>, Vec<String>)>,
         hunk_index_in_file: &mut usize,
+        structures: &[StructureInfo],
     ) {
         let (Some(f), Some((header, lines, raw_lines))) = (file.as_mut(), hunk.take()) else {
             return;
@@ -220,6 +275,10 @@ fn parse_unified_diff(diff_text: &str) -> Vec<FileDiff> {
         let id = format!("{}#{}", f.path.display(), *hunk_index_in_file);
         *hunk_index_in_file += 1;
 
+        // Find the structure that contains this hunk
+        let structure = crate::parser::find_structure_at_line(structures, new_start)
+            .cloned();
+
         f.hunks.push(DiffHunk {
             id,
             file_path: f.path.clone(),
@@ -231,6 +290,7 @@ fn parse_unified_diff(diff_text: &str) -> Vec<FileDiff> {
             lines,
             raw_content: raw_lines.join("\n"),
             stats,
+            structure,
         });
     }
 
@@ -242,6 +302,7 @@ fn parse_unified_diff(diff_text: &str) -> Vec<FileDiff> {
                 &mut current_file,
                 &mut current_hunk,
                 &mut hunk_index_in_file,
+                &current_structures,
             );
             if let Some(f) = current_file.take() {
                 files.push(f);
@@ -254,6 +315,15 @@ fn parse_unified_diff(diff_text: &str) -> Vec<FileDiff> {
                 .rsplit_once(" b/")
                 .map(|(_a, b)| PathBuf::from(b))
                 .unwrap_or_else(|| PathBuf::from(rest));
+
+            // Parse structures for the new file
+            current_structures = Vec::new();
+            let full_path = repo_root.join(&path);
+            if let Ok(content) = fs::read_to_string(&full_path) {
+                if let Some(structures) = crate::parser::parse_file_structures(&path, &content) {
+                    current_structures = structures;
+                }
+            }
 
             current_file = Some(FileDiff {
                 path,
@@ -278,6 +348,7 @@ fn parse_unified_diff(diff_text: &str) -> Vec<FileDiff> {
                 &mut current_file,
                 &mut current_hunk,
                 &mut hunk_index_in_file,
+                &current_structures,
             );
             current_hunk = Some((format!("@@ {header}"), Vec::new(), vec![line.to_string()]));
             continue;
@@ -321,6 +392,7 @@ fn parse_unified_diff(diff_text: &str) -> Vec<FileDiff> {
         &mut current_file,
         &mut current_hunk,
         &mut hunk_index_in_file,
+        &current_structures,
     );
     if let Some(f) = current_file.take() {
         files.push(f);
