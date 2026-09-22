@@ -79,20 +79,28 @@ fn summarize_diffs(diffs: &[FileDiff], files: &[ChangedFile]) -> String {
             crate::ChangeKind::Renamed => summary.push_str("Status: Renamed\n"),
         }
 
-        // Add diff content
+        // Add diff content with structure information (Module 18)
         if !diff.hunks.is_empty() {
             summary.push_str("Changes:\n");
-            for hunk in &diff.hunks {
+            for (hunk_index, hunk) in diff.hunks.iter().enumerate() {
+                summary.push_str(&format!("  Hunk #{}\n", hunk_index));
+                
+                // Add structure information if available
+                if let Some(structure) = &hunk.structure {
+                    summary.push_str(&format!("    Structure: {} ({})\n", structure.name, structure.kind));
+                    summary.push_str(&format!("    Language: {}\n", structure.language));
+                }
+                
                 for line in &hunk.lines {
                     match line {
                         crate::DiffLine::Added(content) => {
-                            summary.push_str(&format!("+ {}\n", content));
+                            summary.push_str(&format!("    + {}\n", content));
                         }
                         crate::DiffLine::Removed(content) => {
-                            summary.push_str(&format!("- {}\n", content));
+                            summary.push_str(&format!("    - {}\n", content));
                         }
                         crate::DiffLine::Context(content) => {
-                            summary.push_str(&format!("  {}\n", content));
+                            summary.push_str(&format!("      {}\n", content));
                         }
                     }
                 }
