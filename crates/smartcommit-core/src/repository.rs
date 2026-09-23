@@ -1,32 +1,13 @@
-//! Git repository detection (Module 1).
-//!
-//! Shells out to the system `git` binary rather than linking
-//! `libgit2`/`git2` — consistent with the rest of the MVP engine,
-//! and avoids pulling in a heavier dependency before a module
-//! actually needs the extra control `git2` would offer (e.g.
-//! Module 10's index manipulation).
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Structured result of a successful repository discovery.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepositoryInfo {
-    /// The working-tree root. For a bare repository (which has no
-    /// working tree) this is the bare repository's own directory —
-    /// there is nothing else it could sensibly mean.
     pub root: PathBuf,
-    /// Absolute path to the `.git` directory (or, for a bare
-    /// repository, the repository directory itself).
     pub git_dir: PathBuf,
-    /// Whether this is a bare repository (no working tree).
     pub is_bare: bool,
 }
 
-/// Errors `Repository::discover` can return. Every variant here
-/// represents an expected, non-panicking outcome — an invalid or
-/// inaccessible path, or a path that simply isn't a Git repository,
-/// is normal user input, not a bug.
 #[derive(Debug, thiserror::Error)]
 pub enum RepositoryError {
     #[error("path does not exist: {0}")]
@@ -42,21 +23,9 @@ pub enum RepositoryError {
     GitUnavailable(String),
 }
 
-/// Namespace for repository discovery. A unit struct rather than a
-/// module-level free function so call sites read as `Repository::discover(..)`,
-/// matching the API shape modules.md suggests and leaving room for
-/// this to grow instance methods later (e.g. once Module 2 adds
-/// state inspection) without a breaking API change.
 pub struct Repository;
 
 impl Repository {
-    /// Discovers the Git repository containing `path`.
-    ///
-    /// `path` may be the repository root, any directory nested
-    /// inside it, or an explicit `--repo` path supplied by the CLI.
-    /// Git's own upward directory search (via `git -C <path>`)
-    /// handles the "nested directory" case without any extra logic
-    /// here.
     pub fn discover(path: impl AsRef<Path>) -> Result<RepositoryInfo, RepositoryError> {
         let path = path.as_ref();
 
@@ -70,13 +39,6 @@ impl Repository {
                 reason: e.to_string(),
             })?;
 
-        // --absolute-git-dir and --is-bare-repository can be
-        // combined and both succeed for bare AND non-bare repos.
-        // --show-toplevel cannot be combined here: it hard-fails
-        // the whole invocation on a bare repo (no working tree to
-        // report), even when other flags in the same call would
-        // have succeeded. So the work-tree root is queried
-        // separately, only once we know we're not bare.
         let probe = Command::new("git")
             .arg("-C")
             .arg(&canonical)
@@ -97,8 +59,6 @@ impl Repository {
         let is_bare = probe_lines.next() == Some("true");
 
         let root = if is_bare {
-            // No working tree — the bare repository directory
-            // itself is the only sensible "root".
             git_dir.clone()
         } else {
             let toplevel = Command::new("git")
@@ -161,11 +121,7 @@ mod tests {
         run_git(&dir, &["init", "--quiet"]);
 
         let info = Repository::discover(&dir).expect("expected discovery to succeed");
-        assert_eq!(
-            info.root,
-            fs::canonicalize(&dir).unwrap(),
-            "root should match the repo directory"
-        );
+        assert_eq!(info.root, fs::canonicalize(&dir).unwrap());
         assert!(!info.is_bare);
         assert!(info.git_dir.ends_with(".git"));
 
@@ -180,11 +136,7 @@ mod tests {
         fs::create_dir_all(&nested).expect("failed to create nested dirs");
 
         let info = Repository::discover(&nested).expect("expected discovery to succeed");
-        assert_eq!(
-            info.root,
-            fs::canonicalize(&dir).unwrap(),
-            "root should resolve up to the repo root, not the nested path"
-        );
+        assert_eq!(info.root, fs::canonicalize(&dir).unwrap());
 
         fs::remove_dir_all(&dir).ok();
     }
@@ -194,10 +146,7 @@ mod tests {
         let dir = make_temp_dir("non-repo");
 
         let result = Repository::discover(&dir);
-        assert!(
-            matches!(result, Err(RepositoryError::NotARepository(_))),
-            "expected NotARepository, got {result:?}"
-        );
+        assert!(matches!(result, Err(RepositoryError::NotARepository(_))));
 
         fs::remove_dir_all(&dir).ok();
     }
@@ -205,13 +154,10 @@ mod tests {
     #[test]
     fn rejects_an_invalid_path() {
         let missing = std::env::temp_dir().join("smartcommit-core-this-path-does-not-exist-abc123");
-        assert!(!missing.exists(), "test fixture path should not exist");
+        assert!(!missing.exists());
 
         let result = Repository::discover(&missing);
-        assert!(
-            matches!(result, Err(RepositoryError::PathNotFound(_))),
-            "expected PathNotFound, got {result:?}"
-        );
+        assert!(matches!(result, Err(RepositoryError::PathNotFound(_))));
     }
 
     #[test]
@@ -221,15 +167,8 @@ mod tests {
         run_git(&parent, &["init", "--quiet", "--bare", "repo.git"]);
 
         let info = Repository::discover(&bare_dir).expect("expected discovery to succeed");
-        assert!(
-            info.is_bare,
-            "expected a bare repository to be detected as bare"
-        );
-        assert_eq!(
-            info.root,
-            fs::canonicalize(&bare_dir).unwrap(),
-            "for a bare repo, root should be the bare repo directory itself"
-        );
+        assert!(info.is_bare);
+        assert_eq!(info.root, fs::canonicalize(&bare_dir).unwrap());
 
         fs::remove_dir_all(&parent).ok();
     }

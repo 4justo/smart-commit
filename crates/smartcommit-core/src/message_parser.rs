@@ -1,31 +1,10 @@
-//! Multiline commit message parsing (Module 5).
-//!
-//! Converts developer-supplied multiline text into individual
-//! intended commit messages. Purely deterministic — no AI involved,
-//! per modules.md's Module 5 spec.
-//!
-//! Two input shapes are supported:
-//! - **Blank-line-separated blocks**: each block (one or more
-//!   consecutive non-blank lines) becomes one message, preserving
-//!   internal line breaks — e.g. a subject line plus body lines with
-//!   no blank line between them.
-//! - **One-message-per-line**: used only when the input has no blank
-//!   lines at all, so a plain list of one-liners doesn't need a
-//!   trailing blank line per entry.
-
 use std::str::FromStr;
 
-/// One parsed, developer-supplied commit message. Kept intentionally
-/// small — just the message text — since planning/matching fields
-/// belong to later modules (Module 6 onward), not this one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitMessage {
     pub text: String,
 }
 
-/// A parsed list of commit messages extracted from multiline input.
-/// The wrapper makes parsing and validation reusable through
-/// `FromStr` rather than a bespoke free function.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitMessages(pub Vec<CommitMessage>);
 
@@ -39,8 +18,6 @@ impl FromStr for CommitMessages {
     type Err = ParseCommitMessagesError;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        // Normalize Windows line endings first so the rest of the
-        // parser only has to reason about `\n`.
         let normalized = input.replace("\r\n", "\n");
         let normalized = normalized.trim();
 
@@ -64,10 +41,6 @@ impl FromStr for CommitMessages {
     }
 }
 
-/// Groups lines into messages separated by one or more blank lines.
-/// A block's lines are trimmed individually and rejoined with `\n`,
-/// so a message can legitimately span multiple lines (e.g. a subject
-/// plus body) as long as nothing blank interrupts it.
 fn parse_blank_line_separated(normalized: &str) -> Vec<CommitMessage> {
     let mut messages = Vec::new();
     let mut current = Vec::new();
@@ -94,9 +67,6 @@ fn parse_blank_line_separated(normalized: &str) -> Vec<CommitMessage> {
     messages
 }
 
-/// One message per non-empty line — used only when the input has no
-/// blank lines at all, so a plain list of one-liners doesn't need a
-/// trailing blank line after each entry.
 fn parse_one_per_line(normalized: &str) -> Vec<CommitMessage> {
     normalized
         .lines()
@@ -186,12 +156,6 @@ mod tests {
 
     #[test]
     fn preserves_a_multiline_message_within_one_blank_line_separated_block() {
-        // A message can legitimately span more than one line (e.g. a
-        // subject plus body) as long as no blank line interrupts it.
-        // This distinguishes "one multi-line message" from "two
-        // one-line messages" — both inputs use blank lines as the
-        // separator, but only an actual blank line inside the block
-        // would split it.
         let parsed: CommitMessages = "Fix authentication\nAcross multiple lines\n\nUpdate README"
             .parse()
             .expect("parser should succeed");
