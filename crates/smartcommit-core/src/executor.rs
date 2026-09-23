@@ -1,52 +1,3 @@
-//! Commit execution (Module 10).
-//!
-//! The most safety-critical module in the MVP: turns an approved
-//! `CommitPlan` into real Git commits. See the module-level test
-//! suite for the scenarios this was validated against, and the
-//! design note below for *why* it's built the way it is — this
-//! design was validated empirically against a real repository
-//! (temp-index behavior, hook scoping, unstaged-change preservation)
-//! before any of this code was written, not assumed.
-//!
-//! # Design: why a temporary index per commit, not `commit-tree`
-//!
-//! The obvious "safe" approach is `git commit-tree` (pure plumbing:
-//! build a tree, create a commit object, move a ref — never touches
-//! the working tree or the real index at all). It was rejected for
-//! one specific reason: **`commit-tree` never runs hooks.**
-//! modules.md explicitly requires treating hook rejection as a real
-//! execution failure, which is impossible if hooks never run.
-//!
-//! Instead, each commit is built with a **temporary index** (a
-//! throwaway file pointed at via the `GIT_INDEX_FILE` environment
-//! variable) containing exactly that commit's intended tree, then
-//! committed with ordinary `git commit` (which does run hooks).
-//! Confirmed empirically in a real repository before writing this
-//! module:
-//! - `git commit` with `GIT_INDEX_FILE` set never touches the real
-//!   `.git/index` — verified by comparing `git ls-files --stage`
-//!   byte-for-byte before and after a multi-commit sequence.
-//! - It never touches the working tree — an unstaged edit *on top
-//!   of* a file being committed in this exact sequence survived
-//!   completely untouched, as did an unrelated file's unstaged edit.
-//! - A `pre-commit` hook invoked this way sees `git diff --cached`
-//!   scoped to *only* the files in that specific commit — not the
-//!   whole original staged set — which is exactly correct, and lets
-//!   a hook rejection be attributed to the specific commit that
-//!   triggered it.
-//! - A rejected commit leaves HEAD unmoved and the real index
-//!   unmoved — confirmed with a hook that unconditionally rejects.
-//!
-//! # Design: sequential real commits, not a build-then-attach batch
-//!
-//! Each group's commit is created and its result is real (the branch
-//! ref has actually moved) before the next group starts — not built
-//! as a chain of dangling objects and attached all at once at the
-//! end. This matches modules.md's failure narrative directly: "if
-//! commit #3 of 5 fails... report completed commits" implies commits
-//! 1 and 2 are already real, visible history at that point, not
-//! still-pending.
-
 use crate::{
     ChangeKind, ChangedFile, CommitGroup, PlannedCommitTime, Repository, RepositoryError,
     SafetyCheckpoint,
@@ -56,42 +7,24 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// One commit that was actually created.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompletedCommit {
     pub message: String,
-    /// Full commit hash.
     pub commit_oid: String,
 }
 
-/// The group whose commit failed, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionFailure {
-    /// Index into the `groups` slice passed to `execute_commit_plan`.
     pub group_index: usize,
     pub message: String,
-    /// Human-readable reason: git's own error/hook rejection text,
-    /// or an internal consistency-check message.
     pub reason: String,
 }
 
-/// The outcome of running the executor. Always returned as `Ok` from
-/// `execute_commit_plan` unless a precondition fails before any
-/// commit is even attempted (see `ExecutionError`) — a mid-sequence
-/// commit failure is a normal, fully-described *outcome*, not a Rust
-/// error, since the caller needs the completed-commits list
-/// alongside the failure, not one or the other.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionReport {
     pub completed: Vec<CompletedCommit>,
-    /// `None` means every group was processed without error.
     pub failure: Option<ExecutionFailure>,
-    /// Messages of every group after the failed one — never
-    /// attempted at all. Empty when `failure` is `None`.
     pub not_attempted: Vec<String>,
-    /// Copied from the `SafetyCheckpoint` passed in, so a caller
-    /// reporting a failure can point the user at recovery
-    /// instructions without holding onto the checkpoint separately.
     pub checkpoint_backup_ref: String,
 }
 
@@ -121,25 +54,6 @@ pub enum ExecutionError {
     TempAreaUnavailable(String),
 }
 
-/// Executes an approved plan: one real commit per non-empty group,
-/// in order, stopping immediately on the first failure.
-///
-/// - `groups`: from `CommitPlan.groups` (Module 7). A group with no
-///   files is skipped — there is nothing to commit for it, and
-///   Module 7 has already surfaced that as a warning during
-///   planning; it is not re-reported here as a failure.
-/// - `timestamps`: `Some` to apply Module 8's planned author/
-///   committer timestamps (looked up by `commit_index` matching each
-///   group's position); `None` to let git use the real current time
-///   for every commit, exactly as if timeline mode were disabled —
-///   this is the direct implementation of modules.md's "if timeline
-///   mode is enabled".
-/// - `checkpoint`: the pre-operation `SafetyCheckpoint` (Module 9).
-///   Its `original_head` is verified to still match the repository's
-///   actual current HEAD before anything else happens — if it
-///   doesn't, something changed the repository after the checkpoint
-///   was taken, and proceeding would build on the wrong assumption
-///   about what "the original state" was.
 pub fn execute_commit_plan(
     repo_path: impl AsRef<Path>,
     groups: &[CommitGroup],
@@ -255,17 +169,11 @@ pub fn execute_commit_plan(
     })
 }
 
-/// One staged file's identity in the Git object database: enough to
-/// re-stage it into a different (temporary) index without touching
-/// the working tree.
 struct StagedEntry {
     mode: String,
     blob: String,
 }
 
-/// Reads every currently-staged path's mode and blob hash from the
-/// real index, once, via `git ls-files --stage` (no pathspec — one
-/// call for everything rather than one call per file).
 fn read_staged_index_entries(
     repo_root: &Path,
 ) -> Result<HashMap<PathBuf, StagedEntry>, ExecutionError> {
@@ -285,7 +193,6 @@ fn read_staged_index_entries(
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut map = HashMap::new();
     for line in stdout.lines() {
-        // Format: "<mode> <blob> <stage>\t<path>"
         if let Some((meta, path)) = line.split_once('\t') {
             let mut parts = meta.split_whitespace();
             if let (Some(mode), Some(blob)) = (parts.next(), parts.next()) {
@@ -302,12 +209,6 @@ fn read_staged_index_entries(
     Ok(map)
 }
 
-/// A scoped temporary directory (under `.git/smartcommit/tmp/`, so
-/// it's guaranteed to sit inside the repository the caller is
-/// already working in) holding one temp-index file per commit in the
-/// sequence. Cleaned up automatically on drop — including on an
-/// early return from a failure — so a failed run never leaves stray
-/// files behind for the next attempt to trip over.
 struct TempIndexArea {
     dir: PathBuf,
 }
@@ -333,9 +234,6 @@ impl Drop for TempIndexArea {
     }
 }
 
-/// Builds a temporary index representing exactly what `group`'s
-/// commit should contain: `parent`'s full tree, with this group's
-/// files added/updated/removed according to their `ChangeKind`.
 fn prepare_temp_index(
     repo_root: &Path,
     index_path: &Path,
@@ -438,12 +336,6 @@ fn remove_path(repo_root: &Path, index_path: &Path, path: &Path) -> Result<(), S
     Ok(())
 }
 
-/// Creates the commit from `index_path`'s content, via ordinary
-/// `git commit` (so hooks run, scoped to exactly this index's
-/// content — see the module doc comment). Author identity is never
-/// overridden, per modules.md's "Do not modify author identity
-/// unless explicitly configured" — only the author/committer *date*
-/// is set, and only when `timestamp` is `Some`.
 fn create_commit(
     repo_root: &Path,
     index_path: &Path,
