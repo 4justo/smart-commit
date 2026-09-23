@@ -1,34 +1,8 @@
-//! Diff extraction (Module 4).
-//!
-//! Extracts the staged diff (HEAD vs. index) for every changed file
-//! as structured hunks, never the unstaged working-tree diff.
-//!
-//! # Why one `git diff` call, not one per file
-//!
-//! An earlier version of this module called `git diff --cached -M
-//! -- <path>` once per file, mirroring Module 3's per-file
-//! `ChangedFile` model. That breaks rename detection: restricting
-//! the diff to a single pathspec stops git from pairing the old and
-//! new sides of a rename, so a genuine rename gets reported as a
-//! plain delete+add instead. Renames can only be detected correctly
-//! when git sees the *entire* staged change set at once. So this
-//! module runs `git diff --cached -M` exactly once (no pathspec)
-//! and splits the resulting unified diff into per-file blocks
-//! itself.
-
 use crate::{Repository, RepositoryError};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-/// One line inside a diff hunk, with its Git-diff prefix already
-/// stripped.
-///
-/// Named `Added`/`Removed` (not `Addition`/`Deletion`) to match the
-/// names already in use throughout the rest of the codebase (Module
-/// 6's matcher, the CLI's `--verbose` renderer) — extending the
-/// existing model rather than introducing a parallel one with
-/// different names for the same concept.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiffLine {
     Context(String),
@@ -36,8 +10,6 @@ pub enum DiffLine {
     Removed(String),
 }
 
-/// Per-hunk line counts (Module 16). `total_changed_lines` is
-/// `additions + deletions` — context lines don't count as "changed."
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct HunkStats {
     pub additions: usize,
@@ -46,7 +18,6 @@ pub struct HunkStats {
     pub total_changed_lines: usize,
 }
 
-/// The kind of code structure detected in a file (Module 18).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StructureKind {
     Function,
@@ -80,75 +51,36 @@ impl std::fmt::Display for StructureKind {
     }
 }
 
-/// Information about a code structure (Module 18).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructureInfo {
-    /// The name of the structure (e.g., "validate_token", "User", "auth")
     pub name: String,
-    /// The kind of structure
     pub kind: StructureKind,
-    /// The starting line number (1-based)
     pub start_line: usize,
-    /// The ending line number (1-based)
     pub end_line: usize,
-    /// The language of the file
     pub language: String,
 }
 
-/// One `@@ ... @@` hunk within a file's diff.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffHunk {
-    /// Deterministic identifier: `"<file path>#<index>"`, where
-    /// `index` is this hunk's 0-based position among its file's
-    /// hunks (hunks within one file never overlap and are always
-    /// produced in order, so this is unique and stable without
-    /// needing a hash — two hunks with byte-identical content still
-    /// get different IDs whenever they're in different files or at
-    /// different positions in the same file).
     pub id: String,
-    /// Same as the parent `FileDiff::path` — carried onto the hunk
-    /// itself so a hunk can be handled independently of its file
-    /// (e.g. a flattened list of hunks across files) without losing
-    /// track of which file it belongs to.
     pub file_path: PathBuf,
     pub old_start: usize,
     pub old_count: usize,
     pub new_start: usize,
     pub new_count: usize,
-    /// The full hunk header line, e.g. `@@ -1,5 +1,5 @@`.
     pub header: String,
     pub lines: Vec<DiffLine>,
-    /// The hunk exactly as it appeared in `git diff` output — the
-    /// header line plus every body line, each still carrying its
-    /// original `+`/`-`/` ` prefix, joined with `\n`. One caveat:
-    /// this is captured via the same line-splitting the rest of the
-    /// parser uses, which (per Rust's `str::lines()`) treats a
-    /// trailing `\r` immediately before `\n` as part of the line
-    /// terminator rather than content — so a file using CRLF line
-    /// endings internally will have that `\r` silently absent here
-    /// too. Parsing itself is unaffected (verified — see
-    /// `extracts_a_hunk_from_a_crlf_file` below); only the literal
-    /// carriage return in `raw_content` and each `DiffLine`'s text
-    /// is not byte-for-byte preserved.
     pub raw_content: String,
     pub stats: HunkStats,
-    /// The code structure this hunk belongs to (Module 18)
     pub structure: Option<StructureInfo>,
 }
 
-/// The staged diff for a single file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileDiff {
-    /// The file's current path — for a rename this is the new path,
-    /// matching `ChangedFile::path` from Module 3. For a delete,
-    /// git repeats the same name on both sides of its `diff --git`
-    /// header, so this is simply that file's path.
     pub path: PathBuf,
     pub hunks: Vec<DiffHunk>,
     pub additions: usize,
     pub deletions: usize,
-    /// True for a binary file. When true, `hunks` is always empty —
-    /// binary content is never parsed as text.
     pub is_binary: bool,
 }
 
@@ -164,14 +96,6 @@ pub enum DiffError {
     CommandFailed(String),
 }
 
-/// Extracts the staged diff for every currently staged file.
-///
-/// Uses `--no-color` and `--no-ext-diff` so output is always plain
-/// unified-diff text, regardless of the caller's git config (color
-/// settings, `diff.external`). Rename detection (`-M`) matches
-/// Module 3's `get_staged_changes` so the two stay consistent.
-///
-/// Returns an empty `Vec` when nothing is staged.
 pub fn get_staged_diffs(path: impl AsRef<std::path::Path>) -> Result<Vec<FileDiff>, DiffError> {
     let repo = Repository::discover(path)?;
 
@@ -191,13 +115,6 @@ pub fn get_staged_diffs(path: impl AsRef<std::path::Path>) -> Result<Vec<FileDif
     Ok(parse_unified_diff(&stdout, &repo.root))
 }
 
-/// Parses one `@@ -a[,b] +c[,d] @@ ...` header into
-/// `(old_start, old_count, new_start, new_count)`. Handles an
-/// omitted count (implying `1`, per the unified diff format — git
-/// omits `,1` when a range is exactly one line) and a trailing
-/// "function context" hint git sometimes appends after the closing
-/// `@@` (e.g. `@@ -3 +3 @@ fn foo() {` — confirmed empirically this
-/// appears even for a single-line change).
 fn parse_hunk_header_ranges(header: &str) -> Option<(usize, usize, usize, usize)> {
     let rest = header.strip_prefix("@@ ")?;
     let close_idx = rest.find("@@")?;
@@ -213,9 +130,6 @@ fn parse_hunk_header_ranges(header: &str) -> Option<(usize, usize, usize, usize)
     Some((old_start, old_count, new_start, new_count))
 }
 
-/// Parses one side of a hunk range: `"start,count"` or, when the
-/// count is omitted (a one-line range), just `"start"` — in which
-/// case the count is `1`.
 fn parse_range(spec: &str) -> Option<(usize, usize)> {
     match spec.split_once(',') {
         Some((start, count)) => Some((start.parse().ok()?, count.parse().ok()?)),
@@ -223,17 +137,6 @@ fn parse_range(spec: &str) -> Option<(usize, usize)> {
     }
 }
 
-/// Parses the full output of `git diff --cached -M --no-color
-/// --no-ext-diff` into one `FileDiff` per `diff --git` section.
-///
-/// # Known limitation
-/// The file path is taken from the `diff --git a/<path> b/<path>`
-/// header by splitting on the first `" b/"` after stripping the
-/// `"diff --git a/"` prefix. A path that legitimately contains the
-/// literal substring `" b/"` would split incorrectly. This matches
-/// the heuristic most diff parsers use and is not expected to cause
-/// problems in practice, but is not a byte-for-byte-safe parse of
-/// git's diff header for adversarial filenames.
 fn parse_unified_diff(diff_text: &str, repo_root: &std::path::Path) -> Vec<FileDiff> {
     let mut files = Vec::new();
     let mut current_file: Option<FileDiff> = None;

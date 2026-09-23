@@ -1,12 +1,6 @@
-//! Code structure parsing using Tree-sitter (Module 18).
-//!
-//! This module detects code structures (functions, classes, structs, etc.)
-//! in source files to provide context for diff hunks.
-
-use crate::diff::{StructureInfo, StructureKind};
+use crate::diff::StructureInfo;
 use std::path::Path;
 
-/// Detect the programming language from a file extension.
 pub fn detect_language(path: &Path) -> String {
     match path.extension().and_then(|e| e.to_str()) {
         Some("rs") => "rust".to_string(),
@@ -29,9 +23,6 @@ pub fn detect_language(path: &Path) -> String {
     }
 }
 
-/// Parse a file and extract all code structures.
-///
-/// Returns None if the language is not supported or parsing fails.
 pub fn parse_file_structures(path: &Path, content: &str) -> Option<Vec<StructureInfo>> {
     let language = detect_language(path);
     
@@ -43,19 +34,18 @@ pub fn parse_file_structures(path: &Path, content: &str) -> Option<Vec<Structure
         "java" => parse_java_structures(content),
         "csharp" => parse_csharp_structures(content),
         "go" => parse_go_structures(content),
-        "c" | "cpp" => parse_c_structures(content),
+        "c" => parse_c_structures(content),
+        "cpp" => parse_cpp_structures(content),
         _ => None,
     }
 }
 
-/// Find the structure that contains a given line number.
 pub fn find_structure_at_line(structures: &[StructureInfo], line: usize) -> Option<&StructureInfo> {
     structures
         .iter()
         .find(|s| line >= s.start_line && line <= s.end_line)
 }
 
-// Rust parser implementation
 #[cfg(feature = "tree-sitter-rust")]
 fn parse_rust_structures(content: &str) -> Option<Vec<StructureInfo>> {
     use tree_sitter::Parser;
@@ -76,7 +66,6 @@ fn parse_rust_structures(content: &str) -> Option<Vec<StructureInfo>> {
 
 #[cfg(not(feature = "tree-sitter-rust"))]
 fn parse_rust_structures(_content: &str) -> Option<Vec<StructureInfo>> {
-    // Fallback: return None if tree-sitter-rust is not enabled
     None
 }
 
@@ -142,7 +131,7 @@ fn extract_rust_nodes(node: &tree_sitter::Node, source: &str, structures: &mut V
             if let Some(name) = extract_impl_name(node, source) {
                 structures.push(StructureInfo {
                     name,
-                    kind: StructureKind::Struct, // impl blocks are associated with structs
+                    kind: StructureKind::Struct,
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "rust".to_string(),
@@ -152,7 +141,6 @@ fn extract_rust_nodes(node: &tree_sitter::Node, source: &str, structures: &mut V
         _ => {}
     }
     
-    // Recursively process children
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         extract_rust_nodes(&child, source, structures);
@@ -219,9 +207,6 @@ fn extract_impl_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
     None
 }
 
-// Placeholder implementations for other languages
-// These will be implemented in subsequent sections
-
 #[cfg(feature = "tree-sitter-python")]
 fn parse_python_structures(content: &str) -> Option<Vec<StructureInfo>> {
     use tree_sitter::Parser;
@@ -271,7 +256,6 @@ fn extract_python_nodes(node: &tree_sitter::Node, source: &str, structures: &mut
             }
         }
         "module" => {
-            // Python modules are typically the file itself, but we can track imports
             if let Some(name) = extract_python_module_name(node, source) {
                 structures.push(StructureInfo {
                     name,
@@ -285,7 +269,6 @@ fn extract_python_nodes(node: &tree_sitter::Node, source: &str, structures: &mut
         _ => {}
     }
     
-    // Recursively process children
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         extract_python_nodes(&child, source, structures);
@@ -314,7 +297,6 @@ fn extract_python_class_name(node: &tree_sitter::Node, source: &str) -> Option<S
 
 #[cfg(feature = "tree-sitter-python")]
 fn extract_python_module_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
-    // For import statements, extract the module name
     for child in node.children(&mut node.walk()) {
         if child.kind() == "dotted_name" || child.kind() == "identifier" {
             return Some(source[child.byte_range()].to_string());
@@ -329,7 +311,6 @@ fn parse_javascript_structures(content: &str) -> Option<Vec<StructureInfo>> {
     
     let mut parser = Parser::new();
     
-    // Try TypeScript first if feature is enabled, fall back to JavaScript
     #[cfg(feature = "tree-sitter-typescript")]
     let lang_name = if parser.set_language(&tree_sitter_typescript::language_typescript()).is_ok() {
         "typescript"
@@ -420,7 +401,6 @@ fn extract_javascript_nodes(node: &tree_sitter::Node, source: &str, structures: 
             }
         }
         "import_statement" | "export_statement" => {
-            // Track imports/exports as structure info
             if let Some(name) = extract_javascript_import_export_name(node, source) {
                 structures.push(StructureInfo {
                     name,
@@ -438,7 +418,6 @@ fn extract_javascript_nodes(node: &tree_sitter::Node, source: &str, structures: 
         _ => {}
     }
     
-    // Recursively process children
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         extract_javascript_nodes(&child, source, structures, lang_name);
@@ -487,11 +466,9 @@ fn extract_javascript_interface_name(node: &tree_sitter::Node, source: &str) -> 
 
 #[cfg(any(feature = "tree-sitter-javascript", feature = "tree-sitter-typescript"))]
 fn extract_javascript_import_export_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
-    // Extract the module or identifier being imported/exported
     for child in node.children(&mut node.walk()) {
         if child.kind() == "string" || child.kind() == "identifier" {
             let text = source[child.byte_range()].to_string();
-            // Clean up quotes from string literals
             if text.starts_with('"') || text.starts_with('\'') {
                 return Some(text.trim_matches('"').trim_matches('\'').to_string());
             }
@@ -574,7 +551,6 @@ fn extract_php_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Ve
         _ => {}
     }
     
-    // Recursively process children
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         extract_php_nodes(&child, source, structures);
@@ -587,7 +563,6 @@ fn extract_php_function_name(node: &tree_sitter::Node, source: &str) -> Option<S
         if child.kind() == "name" {
             return Some(source[child.byte_range()].to_string());
         }
-        // Also try direct identifier
         if child.kind() == "identifier" {
             return Some(source[child.byte_range()].to_string());
         }
@@ -1019,12 +994,10 @@ fn extract_c_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<
 
 #[cfg(feature = "tree-sitter-c")]
 fn extract_c_function_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
-    // C function names are often in a declarator node
     for child in node.children(&mut node.walk()) {
         if child.kind() == "identifier" {
             return Some(source[child.byte_range()].to_string());
         }
-        // Also check in declarator
         if child.kind() == "function_declarator" || child.kind() == "declarator" {
             for subchild in child.children(&mut child.walk()) {
                 if subchild.kind() == "identifier" {
