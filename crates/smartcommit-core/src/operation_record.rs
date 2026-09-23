@@ -1,45 +1,16 @@
-//! Operation record tracking (Module 12, part 1).
-//!
-//! After `execute_commit_plan` runs, SmartCommit records what it
-//! did under `.git/smartcommit/` — this is what `restore` later
-//! reads to know what to undo, and it's what would let a future
-//! `smartcommit history` command (not in this MVP) show past
-//! operations.
-//!
-//! Storage layout, per `ARCHITECTURE.md` §30:
-//! ```text
-//! .git/smartcommit/
-//! ├── last-operation.toml   (always the most recent operation)
-//! └── operations/
-//!     └── <id>.toml         (one file per operation, kept for history)
-//! ```
-//!
-//! No source code or secrets are stored — only commit hashes,
-//! branch names, and timestamps (§30: "Do not store source code
-//! unnecessarily").
-
 use crate::{Repository, RepositoryError};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// How an operation concluded, per `ARCHITECTURE.md` §31's example
-/// (`status = "completed"`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OperationStatus {
-    /// Every group's commit was created successfully.
     Completed,
-    /// At least one commit was created before a failure stopped the
-    /// sequence.
     PartialFailure,
-    /// The very first attempted commit failed — nothing was created.
     Failed,
 }
 
-/// A record of one `smartcommit commit` run: enough to know exactly
-/// what changed and how to undo it, without needing to re-derive
-/// anything from the (possibly since-modified) working tree.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OperationRecord {
     pub id: String,
@@ -53,13 +24,6 @@ pub struct OperationRecord {
 }
 
 impl OperationRecord {
-    /// Builds a record from a completed execution run. `start_time`
-    /// is passed in rather than read from the system clock — same
-    /// testability rationale used throughout (Modules 8 and 9): a
-    /// caller can supply a fixed time for deterministic tests, and
-    /// it doubles as the record's `id` (formatted the same way
-    /// Module 9's checkpoint ref timestamps are), so operations sort
-    /// naturally by filename in the `operations/` directory.
     pub fn from_execution(
         checkpoint: &crate::SafetyCheckpoint,
         report: &crate::ExecutionReport,
@@ -117,8 +81,6 @@ pub enum OperationRecordError {
     NotFound,
 }
 
-/// Writes `record` to both `last-operation.toml` (overwritten every
-/// time) and `operations/<id>.toml` (kept, one per operation).
 pub fn save_operation_record(
     repo_path: impl AsRef<Path>,
     record: &OperationRecord,
@@ -143,10 +105,6 @@ pub fn save_operation_record(
     Ok(())
 }
 
-/// Loads the most recent operation record. This is what `restore`
-/// (with no operation ID given) acts on — browsing older entries in
-/// `operations/` is not yet exposed by any command in this MVP,
-/// though they're written for future use.
 pub fn load_last_operation_record(
     repo_path: impl AsRef<Path>,
 ) -> Result<OperationRecord, OperationRecordError> {
