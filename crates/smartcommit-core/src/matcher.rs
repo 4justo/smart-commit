@@ -1,33 +1,10 @@
-//! Deterministic file-to-message matching (Module 6).
-//!
-//! Scores every (message, file) pair using plain token evidence —
-//! filename words, directory words, file extension, and words that
-//! appear in the file's added diff lines — with no embeddings, no
-//! LLM calls, and no synonym dictionary. The same input always
-//! produces the same scores and the same reasons, in the same
-//! order.
-//!
-//! This module only scores. It does not decide which files belong
-//! to which commit, and it does not flag anything as "unassigned" —
-//! that grouping/ambiguity decision belongs to the Module 7 planner,
-//! which can apply its own threshold to these scores.
-
 use crate::{ChangedFile, CommitMessage, DiffLine, FileDiff};
 use std::collections::BTreeSet;
 use std::path::Path;
 
-/// Filename tokens are the strongest signal — a message that names
-/// the file it changes is rarely wrong about that.
 const FILENAME_WEIGHT: f32 = 0.5;
-/// Directory tokens are a good but weaker signal than the filename
-/// itself (e.g. "auth" as a folder name matches many files in it).
 const DIRECTORY_WEIGHT: f32 = 0.3;
-/// Diff content is the noisiest evidence source — a word appearing
-/// once in an added line is real evidence, but weaker than the
-/// developer naming the file or folder directly.
 const DIFF_WEIGHT: f32 = 0.15;
-/// A literal extension mention ("update rs bindings") is rare but
-/// cheap to check and harmless when it doesn't apply.
 const EXTENSION_WEIGHT: f32 = 0.1;
 
 const STOPWORDS: &[&str] = &[
@@ -36,32 +13,14 @@ const STOPWORDS: &[&str] = &[
     "will", "with",
 ];
 
-/// One message-file pair's match evidence.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchScore {
-    /// Index into the `messages` slice passed to
-    /// `match_files_to_messages`.
     pub message_id: usize,
-    /// Index into the `files` slice passed to
-    /// `match_files_to_messages`.
     pub file_id: usize,
-    /// Always in `[0.0, 1.0]`. Not a probability — a sum of
-    /// deterministic evidence weights, capped.
     pub score: f32,
-    /// Human-readable justification for the score, one entry per
-    /// piece of evidence found. Empty when the score is 0.0. Always
-    /// in the same order for the same input.
     pub reasons: Vec<String>,
 }
 
-/// Scores every (message, file) pair — `messages.len() *
-/// files.len()` entries, in message-major order, so a caller can
-/// slice by message to reproduce the "one message, several
-/// candidate files" view from modules.md's Module 6 example.
-///
-/// `diffs` supplies the diff-token evidence; a file with no matching
-/// entry in `diffs` (diff extraction wasn't run, or it's binary)
-/// simply contributes no diff evidence — not an error.
 pub fn match_files_to_messages(
     messages: &[CommitMessage],
     files: &[ChangedFile],
@@ -88,8 +47,6 @@ pub fn match_files_to_messages(
     results
 }
 
-/// Pre-extracted token evidence for one file, computed once and
-/// reused across every message it's scored against.
 struct FileEvidence {
     filename_tokens: BTreeSet<String>,
     directory_tokens: BTreeSet<String>,
@@ -144,18 +101,6 @@ fn diff_added_line_tokens(diff: &FileDiff) -> BTreeSet<String> {
     tokens
 }
 
-/// Scores one message's tokens against one file's evidence. Each
-/// message token can contribute at most one filename-or-directory
-/// match (filename wins if the token is related to both) plus,
-/// independently, at most one diff match and one extension match —
-/// so a token that's genuinely strong evidence in multiple ways
-/// (e.g. it's both the filename and appears in the diff) counts in
-/// both categories, but never twice within the same category.
-///
-/// "Related" is exact-match-or-shared-prefix (see `tokens_related`)
-/// rather than strict equality: a message about "authentication"
-/// should credit a directory literally named "auth" without a real
-/// stemming library, matching modules.md's own worked example.
 fn score_pair(message_tokens: &BTreeSet<String>, evidence: &FileEvidence) -> (f32, Vec<String>) {
     let mut score = 0.0f32;
     let mut reasons = Vec::new();
@@ -185,13 +130,6 @@ fn score_pair(message_tokens: &BTreeSet<String>, evidence: &FileEvidence) -> (f3
     (score.min(1.0), reasons)
 }
 
-/// Two tokens are "related" if they're identical, or if one is a
-/// prefix of the other and both are at least 3 characters — this is
-/// the module's whole "stemmed/simple normalized match" behavior
-/// (per modules.md's suggested scoring model), deliberately without
-/// a real stemming library: it's what lets a message token like
-/// "authentication" credit a directory token like "auth" as the
-/// same underlying word family.
 fn tokens_related(a: &str, b: &str) -> bool {
     if a == b {
         return true;
@@ -199,26 +137,12 @@ fn tokens_related(a: &str, b: &str) -> bool {
     a.len() >= 3 && b.len() >= 3 && (a.starts_with(b) || b.starts_with(a))
 }
 
-/// Returns the first token in `set` related to `token`, if any.
-/// Iteration is over a `BTreeSet`, so which one is "first" is
-/// itself deterministic when more than one token in the set would
-/// qualify.
 fn best_related_token<'a>(token: &str, set: &'a BTreeSet<String>) -> Option<&'a str> {
     set.iter()
         .find(|candidate| tokens_related(token, candidate))
         .map(String::as_str)
 }
 
-/// Splits `text` into lowercase, stopword-filtered tokens.
-///
-/// Splits on any non-alphanumeric character (so path separators,
-/// punctuation, and whitespace all act as boundaries) and additionally
-/// splits at camelCase boundaries (`fooBar` -> `foo`, `bar`), so
-/// `snake_case`, `kebab-case`, `camelCase`, and plain path segments
-/// all tokenize sensibly with one pass. Applies a deliberately
-/// minimal stemming rule (strip one trailing `s` from words longer
-/// than 3 characters) so `logins` matches a message about `login`
-/// without pulling in a real stemming library.
 fn tokenize(text: &str) -> BTreeSet<String> {
     let mut tokens = BTreeSet::new();
     let mut current = String::new();

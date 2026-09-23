@@ -1,48 +1,15 @@
-//! Timeline generation (Module 8).
-//!
-//! Produces timestamps for a proposed set of commits. Never touches
-//! Git and never creates commits — see `crate::planner` for the
-//! grouping this builds on top of, and Module 10 (not yet
-//! implemented) for where these timestamps eventually get applied
-//! to real commits.
-//!
-//! # Direction of time and the "no future timestamps" rule
-//!
-//! modules.md requires the engine to "never accidentally generate a
-//! future timestamp unless explicitly allowed." The two supported
-//! anchor points handle this differently:
-//!
-//! - **No custom start** (the common case): the *last* commit is
-//!   anchored at `now`, and earlier commits are placed progressively
-//!   further into the past. This can never produce a future
-//!   timestamp by construction — there's no validation to bypass,
-//!   because subtracting a non-negative gap from `now` repeatedly
-//!   can only move backward.
-//! - **Custom start**: the *first* commit is anchored at the given
-//!   time, and later commits move forward from there by the
-//!   configured gaps. This is the branch that can actually reach a
-//!   future timestamp, so it's the one `allow_future` guards.
-
 use crate::{ChangedFile, CommitPlan};
 use chrono::{DateTime, Duration, FixedOffset};
 
-/// One commit's planned timestamp. `commit_index` matches the
-/// position in the input commit list (0 = first/earliest), so it
-/// lines up directly with `CommitPlan::groups`' order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlannedCommitTime {
     pub commit_index: usize,
     pub timestamp: DateTime<FixedOffset>,
 }
 
-/// How the gap between consecutive commits is chosen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimelineMode {
-    /// The same gap between every pair of consecutive commits.
     Fixed { interval: Duration },
-    /// A gap chosen independently (via the supplied `RandomSource`)
-    /// for each pair of consecutive commits, uniformly within
-    /// `[min, max]`.
     Random { min: Duration, max: Duration },
 }
 
@@ -69,20 +36,10 @@ pub enum TimelineError {
     },
 }
 
-/// A source of randomness the timeline engine can draw from,
-/// abstracted so tests can inject a deterministic sequence instead
-/// of real randomness — this is modules.md's "seeded RNG or
-/// deterministic test interface" requirement.
 pub trait RandomSource {
-    /// Returns a value in `[0.0, 1.0)`.
     fn next_unit(&mut self) -> f64;
 }
 
-/// A small, fast, fully deterministic PRNG (splitmix64) used both as
-/// the seeded test-facing source and as the engine for
-/// [`SystemRandomSource`]. Not cryptographically secure — the
-/// timeline only needs "spread out staggered timestamps," not
-/// unpredictability, so a real RNG crate isn't warranted here.
 pub struct SeededRandomSource {
     state: u64,
 }
@@ -95,21 +52,15 @@ impl SeededRandomSource {
 
 impl RandomSource for SeededRandomSource {
     fn next_unit(&mut self) -> f64 {
-        // splitmix64
         self.state = self.state.wrapping_add(0x9E3779B97F4A7C15);
         let mut z = self.state;
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
         z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
         z ^= z >> 31;
-        // Top 53 bits -> a double in [0, 1), the standard technique
-        // for turning a 64-bit PRNG into a uniform float.
         (z >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
     }
 }
 
-/// The non-deterministic source real (non-test) callers should use:
-/// seeds a `SeededRandomSource` from the current time. Good enough
-/// for "commits look plausibly spread out" — not a security context.
 pub struct SystemRandomSource {
     inner: SeededRandomSource,
 }
@@ -138,23 +89,6 @@ impl RandomSource for SystemRandomSource {
     }
 }
 
-/// Generates one timestamp per commit, in commit order.
-///
-/// - `commit_count`: how many timestamps to produce. Must be > 0.
-/// - `mode`: how the gap between consecutive commits is chosen.
-/// - `start`: if `Some`, the first commit is anchored here and later
-///   commits move forward. If `None`, the *last* commit is anchored
-///   at `now` and earlier commits are placed backward — see the
-///   module doc comment for why this is what makes the no-future-
-///   timestamps guarantee unconditional in the common case.
-/// - `now`: the current-time reference. Passed in (not read from the
-///   system clock internally) so future-timestamp validation is
-///   testable without waiting on a real clock.
-/// - `allow_future`: when `false` (the default a caller should use),
-///   a computed timestamp after `now` is a hard error. Only the
-///   `start.is_some()` branch can actually trigger this.
-/// - `rng`: source of randomness for `TimelineMode::Random`. Ignored
-///   for `TimelineMode::Fixed`.
 pub fn generate_timeline(
     commit_count: usize,
     mode: TimelineMode,
@@ -252,7 +186,6 @@ fn next_gap(mode: &TimelineMode, rng: &mut dyn RandomSource) -> Duration {
     }
 }
 
-/// A `CommitGroup` (Module 7) paired with its planned timestamp.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimedCommitGroup {
     pub message: String,
@@ -261,12 +194,6 @@ pub struct TimedCommitGroup {
     pub timestamp: DateTime<FixedOffset>,
 }
 
-/// A `CommitPlan` (Module 7) with a timestamp attached to every
-/// group. This is `ARCHITECTURE.md` §21's `TimedCommitPlan` — the
-/// named artifact in the pipeline `CommitPlan -> TimelineEngine ->
-/// TimedCommitPlan -> Executor`. `unassigned` and `warnings` pass
-/// through unchanged from the input plan; only `groups` gains a
-/// timestamp per entry.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimedCommitPlan {
     pub groups: Vec<TimedCommitGroup>,
@@ -280,15 +207,6 @@ pub enum ApplyTimelineError {
     CountMismatch { timestamps: usize, groups: usize },
 }
 
-/// Pairs each group in `plan` with the timestamp at the matching
-/// `commit_index` in `timestamps`. `timestamps` doesn't need to
-/// already be sorted by `commit_index` — this function sorts its own
-/// copy before pairing — but its length must exactly match
-/// `plan.groups.len()`, since `generate_timeline`'s `commit_count`
-/// is expected to be called with one timestamp requested per group
-/// (including empty ones — modules.md rule 6 applies here too: an
-/// empty group still gets a timestamp, it just won't be used for an
-/// actual commit later).
 pub fn apply_timeline_to_plan(
     plan: CommitPlan,
     timestamps: &[PlannedCommitTime],

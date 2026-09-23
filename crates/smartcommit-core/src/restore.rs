@@ -1,43 +1,3 @@
-//! Restore and recovery (Module 12, part 2).
-//!
-//! # Design: restore is a single ref move, nothing else
-//!
-//! Module 10's commit executor was built so the real `.git/index`
-//! is *never* touched during commit creation — every commit is
-//! constructed via a per-commit temporary index (confirmed
-//! empirically at the time). That guarantee is what makes restore
-//! simple and safe: since the real index still holds exactly the
-//! blobs the user originally staged, undoing the operation only
-//! requires moving the branch (or HEAD, if detached) back to
-//! `original_head` — the index doesn't need to be touched, and
-//! neither does the working tree.
-//!
-//! Confirmed empirically before writing this module: `git update-ref
-//! refs/heads/<branch> <oid>` on the currently-checked-out branch
-//! moves HEAD (since HEAD is a symbolic ref to the branch) while
-//! leaving the working tree and index completely untouched — unlike
-//! `git checkout`, `git reset --hard`, or `git reset --mixed`, none
-//! of which are used here.
-//!
-//! # Design: safety is judged against the *current* repository state
-//!
-//! Per `ARCHITECTURE.md` §32, restore inspects the current state,
-//! compares it against the operation record, and only proceeds
-//! automatically if nothing risky has happened since. Specifically
-//! unsafe:
-//! - the repository's actual current HEAD no longer matches the
-//!   record's `final_head` (something else committed since — moving
-//!   the branch back would silently drop that from the branch's
-//!   reachable history),
-//! - the current branch doesn't match the record's `branch`,
-//! - the checkpoint ref the record points to no longer resolves to
-//!   the recorded `original_head` (can't trust the recovery point).
-//!
-//! In any of these cases, restore refuses to act automatically and
-//! instead prints the exact manual command a developer could run if
-//! they're sure — the decision then rests with a human who has full
-//! information, not with SmartCommit guessing.
-
 use crate::checkpoint::{read_branch, read_head};
 use crate::{
     inspect_repository_state, load_last_operation_record, InspectorError, OperationRecord,
@@ -46,24 +6,13 @@ use crate::{
 use std::path::Path;
 use std::process::Command;
 
-/// Everything needed to show the developer what a restore would do,
-/// and whether it's safe to do automatically.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RestorePlan {
     pub record: OperationRecord,
     pub current_head: String,
     pub current_branch: Option<String>,
-    /// True only if every safety check passed — `execute_restore`
-    /// refuses to run otherwise.
     pub is_safe: bool,
-    /// Human-readable reasons automatic restore was judged unsafe.
-    /// Empty when `is_safe` is true.
     pub unsafe_reasons: Vec<String>,
-    /// Informational, not a safety gate on its own: whether the
-    /// working tree currently has staged, unstaged, or untracked
-    /// changes. Shown to the developer per modules.md's "Working-
-    /// tree state" requirement — restore never touches the working
-    /// tree regardless of this value.
     pub working_tree_has_changes: bool,
 }
 
@@ -88,10 +37,6 @@ pub enum RestoreError {
     RefUpdateFailed(String),
 }
 
-/// Builds a `RestorePlan` by comparing the last recorded operation
-/// against the repository's actual current state. Performs no
-/// writes — safe to call freely, including just to show the
-/// developer what restoring *would* do.
 pub fn plan_restore(repo_path: impl AsRef<Path>) -> Result<RestorePlan, RestoreError> {
     let repo = Repository::discover(&repo_path)?;
     let record = load_last_operation_record(&repo.root)?;
@@ -144,10 +89,6 @@ pub fn plan_restore(repo_path: impl AsRef<Path>) -> Result<RestorePlan, RestoreE
     })
 }
 
-/// Performs the restore: moves the branch (or, if the operation was
-/// on a detached HEAD, HEAD directly) back to `plan.record.original_head`.
-/// Refuses outright if `plan.is_safe` is false — a caller must not
-/// route around an unsafe plan by calling this anyway.
 pub fn execute_restore(
     repo_path: impl AsRef<Path>,
     plan: &RestorePlan,
@@ -179,11 +120,6 @@ pub fn execute_restore(
     Ok(())
 }
 
-/// Manual recovery instructions to show when a plan is judged
-/// unsafe — the same underlying command `execute_restore` would run,
-/// so a developer who has reviewed the situation and wants to
-/// proceed anyway has an exact, correct command rather than having
-/// to guess one.
 pub fn manual_recovery_instructions(record: &OperationRecord) -> String {
     let target_ref = match &record.branch {
         Some(branch) => format!("refs/heads/{branch}"),
@@ -269,9 +205,6 @@ mod tests {
         fs::write(path, contents).unwrap();
     }
 
-    /// Runs a full plan -> checkpoint -> execute -> record sequence
-    /// on a repo with two staged files, each becoming its own
-    /// commit, and returns the repo dir plus the pre-operation HEAD.
     fn run_a_real_operation(label: &str) -> (PathBuf, String) {
         let dir = temp_dir(label);
         git(&dir, &["init", "--quiet"]);
