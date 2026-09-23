@@ -1,5 +1,3 @@
-//! Factory for creating AI provider instances.
-
 #[cfg(feature = "ai")]
 use super::config::{AIConfig, ProviderType};
 #[cfg(feature = "ai")]
@@ -11,7 +9,6 @@ use super::provider::{
 use std::sync::Arc;
 
 #[cfg(feature = "ai")]
-/// Create an AI provider instance based on configuration.
 pub fn create_provider(config: &AIConfig) -> Result<Arc<dyn AIProvider>, String> {
     match config.provider {
         ProviderType::Claude => {
@@ -69,14 +66,11 @@ pub fn create_provider(config: &AIConfig) -> Result<Arc<dyn AIProvider>, String>
 }
 
 #[cfg(feature = "ai")]
-/// Create provider with fallback to alternative if first fails.
 pub fn create_provider_with_fallback(config: &AIConfig) -> Arc<dyn AIProvider> {
-    // Try primary provider first
     if let Ok(provider) = create_provider(config) {
         return provider;
     }
 
-    // Fallback chain: Claude -> OpenAI -> Local
     let fallback_configs = vec![
         (ProviderType::Claude, "claude"),
         (ProviderType::OpenAI, "openai"),
@@ -95,13 +89,11 @@ pub fn create_provider_with_fallback(config: &AIConfig) -> Arc<dyn AIProvider> {
         }
     }
 
-    // If all fail, return a dummy provider that will error appropriately
     Arc::new(UnconfiguredProvider)
 }
 
 #[cfg(feature = "ai")]
 #[allow(dead_code)]
-/// Dummy provider for when no AI is configured.
 struct UnconfiguredProvider;
 
 #[cfg(feature = "ai")]

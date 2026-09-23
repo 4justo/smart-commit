@@ -1,26 +1,18 @@
-//! AI configuration for SmartCommit.
-
 #[cfg(feature = "ai")]
 use serde::{Deserialize, Serialize};
 
-/// AI configuration options.
 #[cfg(feature = "ai")]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AIConfig {
-    /// Which AI provider to use.
     pub provider: ProviderType,
 
-    /// Model selection for the chosen provider.
     pub model: ModelSelection,
 
-    /// API configuration (keys, endpoints, etc.).
     pub api: ApiConfig,
 
-    /// Generation behavior settings.
     pub generation: GenerationConfig,
 }
 
-/// Supported AI providers.
 #[cfg(feature = "ai")]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -31,50 +23,36 @@ pub enum ProviderType {
 }
 
 #[cfg(feature = "ai")]
-/// Model selection per provider.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ModelSelection {
-    /// Claude model identifier (e.g., "claude-3-sonnet-20240229").
     pub claude: Option<String>,
 
-    /// OpenAI model identifier (e.g., "gpt-4-turbo-preview").
     pub openai: Option<String>,
 
-    /// Local LLM model name (e.g., "llama2", "mistral").
     pub local: Option<String>,
 }
 
 #[cfg(feature = "ai")]
-/// API configuration keys and endpoints.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ApiConfig {
-    /// Anthropic API key for Claude.
     pub claude_api_key: Option<String>,
 
-    /// OpenAI API key.
     pub openai_api_key: Option<String>,
 
-    /// Base URL for local LLM (e.g., "http://localhost:11434").
     pub local_base_url: Option<String>,
 }
 
 #[cfg(feature = "ai")]
-/// Generation behavior settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GenerationConfig {
-    /// Maximum tokens for AI responses.
     pub max_tokens: Option<usize>,
 
-    /// Temperature for response randomness (0.0 - 1.0).
     pub temperature: Option<f32>,
 
-    /// Whether to use AI for message generation.
     pub enable_message_generation: bool,
 
-    /// Whether to use AI for semantic file matching.
     pub enable_semantic_matching: bool,
 
-    /// Fallback to keyword matching if AI fails.
     pub fallback_to_keywords: bool,
 }
 
@@ -105,11 +83,9 @@ impl Default for AIConfig {
 }
 
 #[cfg(feature = "ai")]
-/// Load AI configuration from environment variables.
 pub fn load_ai_config_from_env() -> AIConfig {
     let mut config = AIConfig::default();
 
-    // Override with environment variables if present
     if let Ok(claude_key) = std::env::var("ANTHROPIC_API_KEY") {
         config.api.claude_api_key = Some(claude_key);
     }
@@ -122,13 +98,12 @@ pub fn load_ai_config_from_env() -> AIConfig {
         config.api.local_base_url = Some(local_url);
     }
 
-    // Provider selection from env
     if let Ok(provider) = std::env::var("SMC_AI_PROVIDER") {
         config.provider = match provider.to_lowercase().as_str() {
             "claude" => ProviderType::Claude,
             "openai" => ProviderType::OpenAI,
             "local" => ProviderType::Local,
-            _ => config.provider, // keep default if invalid
+            _ => config.provider,
         };
     }
 
@@ -136,7 +111,6 @@ pub fn load_ai_config_from_env() -> AIConfig {
 }
 
 #[cfg(feature = "ai")]
-/// Validate that the AI configuration is usable.
 pub fn validate_ai_config(config: &AIConfig) -> Result<(), String> {
     match config.provider {
         ProviderType::Claude => {
@@ -175,7 +149,6 @@ pub fn validate_ai_config(config: &AIConfig) -> Result<(), String> {
 }
 
 #[cfg(feature = "ai")]
-/// Get the model identifier for the current provider.
 pub fn get_model_for_provider(config: &AIConfig) -> Result<String, String> {
     match config.provider {
         ProviderType::Claude => config
