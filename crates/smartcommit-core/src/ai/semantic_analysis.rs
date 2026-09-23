@@ -1,8 +1,3 @@
-//! AI-assisted semantic change analysis (Module 17).
-//!
-//! Combines deterministic analysis with AI semantic understanding to categorize
-//! changes while handling disagreements and AI unavailability.
-
 #[cfg(feature = "ai")]
 use super::config::AIConfig;
 #[cfg(feature = "ai")]
@@ -17,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[cfg(feature = "ai")]
-/// Error types for semantic analysis.
 #[derive(Error, Debug)]
 pub enum SemanticAnalysisError {
     #[error("Provider error: {0}")]
@@ -34,7 +28,6 @@ pub enum SemanticAnalysisError {
 }
 
 #[cfg(feature = "ai")]
-/// Deterministic change categories based on file patterns and content.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum DeterministicCategory {
     Feature,
@@ -51,7 +44,6 @@ pub enum DeterministicCategory {
 }
 
 #[cfg(feature = "ai")]
-/// Result of deterministic analysis.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeterministicAnalysis {
     pub category: DeterministicCategory,
@@ -60,7 +52,6 @@ pub struct DeterministicAnalysis {
     pub keywords: Vec<String>,
 }
 
-/// AI-provided semantic analysis.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AISemanticAnalysis {
     pub category: ChangeCategory,
@@ -71,7 +62,6 @@ pub struct AISemanticAnalysis {
 }
 
 #[cfg(feature = "ai")]
-/// Combined semantic analysis result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SemanticAnalysis {
     pub category: SemanticCategory,
@@ -82,7 +72,6 @@ pub struct SemanticAnalysis {
 }
 
 #[cfg(feature = "ai")]
-/// Final semantic category after combining analyses.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "ai", derive(Serialize, Deserialize))]
 pub enum SemanticCategory {
@@ -100,25 +89,17 @@ pub enum SemanticCategory {
 }
 
 #[cfg(feature = "ai")]
-/// How the final result was determined.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum CombinedResult {
-    /// Deterministic and AI agreed
     Agreement,
-    /// Deterministic and AI disagreed - AI preferred due to higher confidence
     AIPreferred,
-    /// Deterministic and AI disagreed - deterministic preferred due to higher confidence
     DeterministicPreferred,
-    /// Only deterministic analysis available
     DeterministicOnly,
-    /// Only AI analysis available
     AIOnly,
-    /// Both analyses unavailable
     Unknown,
 }
 
 #[cfg(feature = "ai")]
-/// Analyze changes semantically using both deterministic and AI analysis.
 pub async fn analyze_changes_semantically(
     diffs: &[FileDiff],
     files: &[ChangedFile],
@@ -132,10 +113,8 @@ pub async fn analyze_changes_semantically(
     let mut results = Vec::new();
 
     for (diff, file) in diffs.iter().zip(files.iter()) {
-        // Perform deterministic analysis
         let deterministic = perform_deterministic_analysis(diff, file);
 
-        // Perform AI analysis if provider is available
         let ai_analysis = if let Some(p) = provider {
             match perform_ai_analysis(diff, file, config, p).await {
                 Ok(analysis) => Some(analysis),
@@ -167,7 +146,6 @@ pub async fn analyze_changes_semantically(
 }
 
 #[cfg(feature = "ai")]
-/// Perform deterministic analysis based on file patterns and content.
 fn perform_deterministic_analysis(diff: &FileDiff, file: &ChangedFile) -> DeterministicAnalysis {
     let mut evidence = Vec::new();
     let mut keywords = Vec::new();
@@ -176,7 +154,6 @@ fn perform_deterministic_analysis(diff: &FileDiff, file: &ChangedFile) -> Determ
 
     let path_str = file.path.display().to_string().to_lowercase();
 
-    // File extension analysis
     if path_str.ends_with(".md") || path_str.ends_with(".rst") || path_str.ends_with(".txt") {
         category = DeterministicCategory::Documentation;
         evidence.push("Documentation file extension".to_string());
@@ -209,7 +186,6 @@ fn perform_deterministic_analysis(diff: &FileDiff, file: &ChangedFile) -> Determ
         confidence = 0.9;
     }
 
-    // Directory structure analysis
     if path_str.contains("/docs/") || path_str.contains("/documentation/") {
         category = DeterministicCategory::Documentation;
         evidence.push("Documentation directory".to_string());
@@ -224,14 +200,12 @@ fn perform_deterministic_analysis(diff: &FileDiff, file: &ChangedFile) -> Determ
         confidence = confidence.max(0.85);
     }
 
-    // Diff content analysis
     for hunk in &diff.hunks {
         for line in &hunk.lines {
             match line {
                 DiffLine::Added(content) => {
                     let content_lower = content.to_lowercase();
 
-                    // Bug fix indicators
                     if content_lower.contains("fix")
                         || content_lower.contains("bug")
                         || content_lower.contains("error")
@@ -245,7 +219,6 @@ fn perform_deterministic_analysis(diff: &FileDiff, file: &ChangedFile) -> Determ
                         keywords.push("fix".to_string());
                     }
 
-                    // Feature indicators
                     if content_lower.contains("add")
                         || content_lower.contains("new")
                         || content_lower.contains("implement")
@@ -261,7 +234,6 @@ fn perform_deterministic_analysis(diff: &FileDiff, file: &ChangedFile) -> Determ
                         keywords.push("feature".to_string());
                     }
 
-                    // Performance indicators
                     if content_lower.contains("optimize")
                         || content_lower.contains("performance")
                         || content_lower.contains("cache")
@@ -351,7 +323,6 @@ fn perform_deterministic_analysis(diff: &FileDiff, file: &ChangedFile) -> Determ
 }
 
 #[cfg(feature = "ai")]
-/// Perform AI analysis for semantic understanding.
 async fn perform_ai_analysis(
     diff: &FileDiff,
     file: &ChangedFile,
@@ -381,7 +352,6 @@ async fn perform_ai_analysis(
 }
 
 #[cfg(feature = "ai")]
-/// Build context for AI semantic analysis.
 fn build_semantic_context(diff: &FileDiff, file: &ChangedFile) -> String {
     let mut context = String::new();
 
@@ -414,7 +384,6 @@ fn build_semantic_context(diff: &FileDiff, file: &ChangedFile) -> String {
 }
 
 #[cfg(feature = "ai")]
-/// Build system prompt for semantic analysis.
 fn build_semantic_system_prompt() -> String {
     r#"You are an expert code analyst specializing in understanding the semantic meaning of changes.
 Your task is to analyze code changes and categorize them semantically.
@@ -451,7 +420,6 @@ Format your response as JSON:
 }
 
 #[cfg(feature = "ai")]
-/// Build user prompt with semantic context.
 fn build_semantic_user_prompt(context: &str) -> String {
     format!(
         "Analyze the following code change semantically:\n\n{}",
@@ -460,7 +428,6 @@ fn build_semantic_user_prompt(context: &str) -> String {
 }
 
 #[cfg(feature = "ai")]
-/// Parse AI semantic analysis response.
 fn parse_semantic_response(response: &str) -> Result<AISemanticAnalysis, SemanticAnalysisError> {
     let json_start = response.find('{').ok_or_else(|| {
         SemanticAnalysisError::InvalidResponse("No JSON found in response".to_string())
@@ -493,7 +460,6 @@ fn parse_semantic_response(response: &str) -> Result<AISemanticAnalysis, Semanti
 }
 
 #[cfg(feature = "ai")]
-/// Parse change category string to enum.
 fn parse_change_category(s: &str) -> ChangeCategory {
     match s.to_lowercase().as_str() {
         "feature" => ChangeCategory::Feature,
@@ -512,7 +478,6 @@ fn parse_change_category(s: &str) -> ChangeCategory {
 }
 
 #[cfg(feature = "ai")]
-/// Combined analysis result.
 struct CombinedAnalysis {
     category: SemanticCategory,
     result_type: CombinedResult,
@@ -520,7 +485,6 @@ struct CombinedAnalysis {
 }
 
 #[cfg(feature = "ai")]
-/// Combine deterministic and AI analyses.
 fn combine_analyses(
     deterministic: &DeterministicAnalysis,
     ai: Option<&AISemanticAnalysis>,
@@ -591,7 +555,6 @@ fn combine_analyses(
 }
 
 #[cfg(feature = "ai")]
-/// Map deterministic category to semantic category.
 fn map_deterministic_to_semantic(det: &DeterministicCategory) -> SemanticCategory {
     match det {
         DeterministicCategory::Feature => SemanticCategory::Feature,
@@ -609,7 +572,6 @@ fn map_deterministic_to_semantic(det: &DeterministicCategory) -> SemanticCategor
 }
 
 #[cfg(feature = "ai")]
-/// Map AI category to semantic category.
 fn map_ai_to_semantic(ai: &ChangeCategory) -> SemanticCategory {
     match ai {
         ChangeCategory::BugFix => SemanticCategory::BugFix,

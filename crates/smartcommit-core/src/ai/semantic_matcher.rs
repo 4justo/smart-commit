@@ -1,5 +1,3 @@
-//! AI-powered semantic file-to-commit matching.
-
 #[cfg(feature = "ai")]
 use super::config::AIConfig;
 #[cfg(feature = "ai")]
@@ -10,7 +8,6 @@ use crate::{ChangedFile, CommitMessage, FileDiff};
 use thiserror::Error;
 
 #[cfg(feature = "ai")]
-/// Error types for semantic matching.
 #[derive(Error, Debug)]
 pub enum SemanticMatchError {
     #[error("Provider error: {0}")]
@@ -27,21 +24,16 @@ pub enum SemanticMatchError {
 }
 
 #[cfg(feature = "ai")]
-/// Result of semantic file-to-commit matching.
 #[derive(Debug, Clone)]
 pub struct SemanticMatchResult {
-    /// Message index -> list of file indices that belong to this commit.
     pub assignments: Vec<Vec<usize>>,
 
-    /// Files that couldn't be confidently assigned (indices).
     pub unassigned: Vec<usize>,
 
-    /// Confidence scores for each assignment (0.0 - 1.0).
     pub confidences: Vec<f32>,
 }
 
 #[cfg(feature = "ai")]
-/// Use AI to semantically match files to commit messages.
 pub async fn semantic_file_matching(
     messages: &[CommitMessage],
     files: &[ChangedFile],
@@ -60,8 +52,8 @@ pub async fn semantic_file_matching(
     let request = MessageRequest {
         system_prompt,
         user_prompt,
-        max_tokens: Some(2048), // Need more tokens for complex matching
-        temperature: Some(0.3), // Lower temperature for more deterministic results
+        max_tokens: Some(2048),
+        temperature: Some(0.3),
     };
 
     let response = provider.generate_message(&request).await?;
@@ -70,7 +62,6 @@ pub async fn semantic_file_matching(
 }
 
 #[cfg(feature = "ai")]
-/// Build context for semantic matching.
 fn build_matching_context(
     messages: &[CommitMessage],
     files: &[ChangedFile],
@@ -94,12 +85,10 @@ fn build_matching_context(
             crate::ChangeKind::Renamed => context.push_str("   Status: Renamed\n"),
         }
 
-        // Add relevant diff content if available
         if let Some(diff) = diffs.iter().find(|d| d.path == file.path) {
             if !diff.hunks.is_empty() {
                 context.push_str("   Sample changes:\n");
                 for hunk in diff.hunks.iter().take(2) {
-                    // Limit to avoid overwhelming context
                     for line in hunk.lines.iter().take(5) {
                         match line {
                             crate::DiffLine::Added(content) => {
@@ -122,7 +111,6 @@ fn build_matching_context(
 }
 
 #[cfg(feature = "ai")]
-/// Build system prompt for semantic matching.
 fn build_semantic_matching_system_prompt() -> String {
     r#"You are an expert at understanding code changes and their semantic relationships.
 Your task is to match files to commit messages based on the actual meaning and purpose
@@ -154,7 +142,6 @@ confidence: 0.3"#
 }
 
 #[cfg(feature = "ai")]
-/// Build user prompt for semantic matching.
 fn build_semantic_matching_user_prompt(context: &str) -> String {
     format!(
         "Match the following files to the commit messages based on semantic understanding:\n\n{}",
@@ -163,7 +150,6 @@ fn build_semantic_matching_user_prompt(context: &str) -> String {
 }
 
 #[cfg(feature = "ai")]
-/// Parse the AI response into semantic match results.
 fn parse_semantic_response(
     response: &str,
     message_count: usize,
@@ -216,7 +202,6 @@ fn parse_semantic_response(
     })
 }
 
-/// Parse comma-separated file indices.
 fn parse_file_indices(input: &str, max_index: usize) -> Result<Vec<usize>, SemanticMatchError> {
     let mut indices = Vec::new();
 
@@ -233,7 +218,6 @@ fn parse_file_indices(input: &str, max_index: usize) -> Result<Vec<usize>, Seman
 }
 
 #[cfg(feature = "ai")]
-/// Hybrid approach: combine AI semantic matching with keyword matching as fallback.
 pub async fn hybrid_file_matching(
     messages: &[CommitMessage],
     files: &[ChangedFile],
@@ -241,12 +225,10 @@ pub async fn hybrid_file_matching(
     config: &AIConfig,
     provider: &dyn AIProvider,
 ) -> Result<SemanticMatchResult, SemanticMatchError> {
-    // Try AI matching first
     match semantic_file_matching(messages, files, diffs, config, provider).await {
         Ok(result) => Ok(result),
         Err(e) => {
             if config.generation.fallback_to_keywords {
-                // Fallback to keyword matching on AI failure
                 eprintln!(
                     "AI matching failed, falling back to keyword matching: {}",
                     e
@@ -260,13 +242,11 @@ pub async fn hybrid_file_matching(
 }
 
 #[cfg(feature = "ai")]
-/// Fallback to original keyword matching.
 fn keyword_matching_fallback(
     messages: &[CommitMessage],
     files: &[ChangedFile],
     diffs: &[FileDiff],
 ) -> SemanticMatchResult {
-    // Use the existing keyword matcher from the core crate
     let scores = crate::match_files_to_messages(messages, files, diffs);
 
     let message_count = messages.len();
@@ -274,7 +254,6 @@ fn keyword_matching_fallback(
     let mut unassigned: Vec<usize> = Vec::new();
     let mut confidences: Vec<f32> = vec![0.0; message_count];
 
-    // Simple assignment: assign each file to its highest-scoring message
     for file_idx in 0..files.len() {
         let mut best_message: Option<usize> = None;
         let mut best_score: f32 = 0.0;

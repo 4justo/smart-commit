@@ -1,8 +1,3 @@
-//! AI-powered hunk-level diff analysis (Module 16+).
-//!
-//! Provides semantic analysis of individual Git diff hunks to understand
-//! the nature, complexity, and relationships of changes within files.
-
 #[cfg(feature = "ai")]
 use super::config::AIConfig;
 #[cfg(feature = "ai")]
@@ -15,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[cfg(feature = "ai")]
-/// Error types for hunk analysis.
 #[derive(Error, Debug)]
 pub enum HunkAnalysisError {
     #[error("Provider error: {0}")]
@@ -32,7 +26,6 @@ pub enum HunkAnalysisError {
 }
 
 #[cfg(feature = "ai")]
-/// Semantic categorization of a hunk's change type.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ChangeCategory {
     BugFix,
@@ -47,7 +40,6 @@ pub enum ChangeCategory {
     Other(String),
 }
 
-/// Risk assessment for a hunk.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum RiskLevel {
     Low,
@@ -56,47 +48,30 @@ pub enum RiskLevel {
     Critical,
 }
 
-/// Detailed analysis of a single hunk.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HunkAnalysis {
-    /// The hunk being analyzed
     pub hunk_id: String,
-    /// File path for context
     pub file_path: String,
-    /// Semantic category of the change
     pub category: ChangeCategory,
-    /// Risk assessment
     pub risk_level: RiskLevel,
-    /// Natural language description of what the hunk does
     pub description: String,
-    /// Estimated complexity (1-10 scale)
     pub complexity: u8,
-    /// Related hunk IDs that should be grouped with this one
     pub related_hunks: Vec<String>,
-    /// Whether this hunk should be a separate commit
     pub should_split: bool,
-    /// Reasoning for the analysis
     pub reasoning: String,
 }
 
 #[cfg(feature = "ai")]
-/// Overall analysis of all hunks in a diff.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiffAnalysis {
-    /// Individual hunk analyses
     pub hunk_analyses: Vec<HunkAnalysis>,
-    /// Suggested commit groupings (each vector is a group of hunk IDs)
     pub suggested_groups: Vec<Vec<String>>,
-    /// Overall complexity assessment
     pub overall_complexity: u8,
-    /// Overall risk assessment
     pub overall_risk: RiskLevel,
-    /// Recommendations for commit strategy
     pub recommendations: Vec<String>,
 }
 
 #[cfg(feature = "ai")]
-/// Analyze hunks semantically using AI.
 pub async fn analyze_hunks(
     diffs: &[FileDiff],
     config: &AIConfig,
@@ -133,7 +108,6 @@ pub async fn analyze_hunks(
     parse_analysis_response(&response.content, &all_hunks)
 }
 
-/// Build a summary of all hunks for AI analysis.
 fn build_hunk_summary(hunks: &[(&FileDiff, &DiffHunk)]) -> String {
     let mut summary = String::new();
 
@@ -165,7 +139,6 @@ fn build_hunk_summary(hunks: &[(&FileDiff, &DiffHunk)]) -> String {
 }
 
 #[cfg(feature = "ai")]
-/// Build system prompt for hunk analysis.
 fn build_analysis_system_prompt() -> String {
     r#"You are an expert code analyst specializing in understanding Git diff hunks.
 Your task is to analyze individual code hunks and provide semantic insights.
@@ -208,7 +181,6 @@ Format your response as JSON with this structure:
 }
 
 #[cfg(feature = "ai")]
-/// Build user prompt with hunk context.
 fn build_analysis_user_prompt(hunk_summary: &str) -> String {
     format!(
         "Analyze the following Git diff hunks and provide semantic analysis:\n\n{}",
@@ -217,12 +189,10 @@ fn build_analysis_user_prompt(hunk_summary: &str) -> String {
 }
 
 #[cfg(feature = "ai")]
-/// Parse AI response into structured analysis.
 fn parse_analysis_response(
     response: &str,
     _hunks: &[(&FileDiff, &DiffHunk)],
 ) -> Result<DiffAnalysis, HunkAnalysisError> {
-    // Try to extract JSON from the response
     let json_start = response.find('{').ok_or_else(|| {
         HunkAnalysisError::InvalidResponse("No JSON found in response".to_string())
     })?;
@@ -309,7 +279,6 @@ fn parse_analysis_response(
 }
 
 #[cfg(feature = "ai")]
-/// Parse category string to enum.
 fn parse_category(s: &str) -> ChangeCategory {
     match s.to_lowercase().as_str() {
         "bugfix" => ChangeCategory::BugFix,
@@ -326,7 +295,6 @@ fn parse_category(s: &str) -> ChangeCategory {
 }
 
 #[cfg(feature = "ai")]
-/// Parse risk level string to enum.
 fn parse_risk_level(s: &str) -> RiskLevel {
     match s.to_lowercase().as_str() {
         "low" => RiskLevel::Low,
