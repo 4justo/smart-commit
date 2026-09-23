@@ -1,11 +1,8 @@
-//! AI provider abstraction supporting multiple backends.
-
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[cfg(feature = "ai")]
-/// Error types for AI provider operations.
 #[derive(Error, Debug)]
 pub enum ProviderError {
     #[error("API request failed: {0}")]
@@ -31,38 +28,28 @@ pub enum ProviderError {
 }
 
 #[cfg(feature = "ai")]
-/// Request for AI message generation.
 #[derive(Debug, Clone, Serialize)]
 pub struct MessageRequest {
-    /// The system prompt/context for the AI.
     pub system_prompt: String,
 
-    /// The user prompt containing the diff and context.
     pub user_prompt: String,
 
-    /// Maximum tokens for the response.
     pub max_tokens: Option<usize>,
 
-    /// Temperature for response randomness (0.0 - 1.0).
     pub temperature: Option<f32>,
 }
 
 #[cfg(feature = "ai")]
-/// Response from AI message generation.
 #[derive(Debug, Clone, Deserialize)]
 pub struct MessageResponse {
-    /// The generated message text.
     pub content: String,
 
-    /// Token usage information if available.
     pub usage: Option<TokenUsage>,
 
-    /// Model used for generation.
     pub model: String,
 }
 
 #[cfg(feature = "ai")]
-/// Token usage information.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TokenUsage {
     pub prompt_tokens: u32,
@@ -71,24 +58,19 @@ pub struct TokenUsage {
 }
 
 #[cfg(feature = "ai")]
-/// AI provider trait for supporting multiple backends.
 #[async_trait]
 pub trait AIProvider: Send + Sync {
-    /// Generate a response for the given request.
     async fn generate_message(
         &self,
         request: &MessageRequest,
     ) -> Result<MessageResponse, ProviderError>;
 
-    /// Get the provider name for identification.
     fn provider_name(&self) -> &'static str;
 
-    /// Check if the provider is properly configured.
     fn is_configured(&self) -> bool;
 }
 
 #[cfg(feature = "ai")]
-/// Claude (Anthropic) provider implementation.
 pub struct ClaudeProvider {
     api_key: String,
     model: String,
@@ -189,7 +171,6 @@ impl AIProvider for ClaudeProvider {
 }
 
 #[cfg(feature = "ai")]
-/// OpenAI provider implementation.
 pub struct OpenAIProvider {
     api_key: String,
     model: String,
@@ -292,7 +273,6 @@ impl AIProvider for OpenAIProvider {
 }
 
 #[cfg(feature = "ai")]
-/// Local LLM provider (Ollama) implementation.
 pub struct LocalLLMProvider {
     base_url: String,
     model: String,

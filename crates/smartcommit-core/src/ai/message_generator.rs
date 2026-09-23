@@ -1,5 +1,3 @@
-//! AI-powered commit message generation from code diffs.
-
 #[cfg(feature = "ai")]
 use super::config::AIConfig;
 #[cfg(feature = "ai")]
@@ -10,7 +8,6 @@ use crate::{ChangedFile, FileDiff};
 use thiserror::Error;
 
 #[cfg(feature = "ai")]
-/// Error types for message generation.
 #[derive(Error, Debug)]
 pub enum GenerationError {
     #[error("Provider error: {0}")]
@@ -30,7 +27,6 @@ pub enum GenerationError {
 }
 
 #[cfg(feature = "ai")]
-/// Generate commit messages from staged changes using AI.
 pub async fn generate_commit_messages(
     diffs: &[FileDiff],
     files: &[ChangedFile],
@@ -65,7 +61,6 @@ pub async fn generate_commit_messages(
 }
 
 #[cfg(feature = "ai")]
-/// Summarize diffs for AI context.
 fn summarize_diffs(diffs: &[FileDiff], files: &[ChangedFile]) -> String {
     let mut summary = String::new();
 
@@ -79,13 +74,11 @@ fn summarize_diffs(diffs: &[FileDiff], files: &[ChangedFile]) -> String {
             crate::ChangeKind::Renamed => summary.push_str("Status: Renamed\n"),
         }
 
-        // Add diff content with structure information (Module 18)
         if !diff.hunks.is_empty() {
             summary.push_str("Changes:\n");
             for (hunk_index, hunk) in diff.hunks.iter().enumerate() {
                 summary.push_str(&format!("  Hunk #{}\n", hunk_index));
                 
-                // Add structure information if available
                 if let Some(structure) = &hunk.structure {
                     summary.push_str(&format!("    Structure: {} ({})\n", structure.name, structure.kind));
                     summary.push_str(&format!("    Language: {}\n", structure.language));
@@ -114,7 +107,6 @@ fn summarize_diffs(diffs: &[FileDiff], files: &[ChangedFile]) -> String {
 }
 
 #[cfg(feature = "ai")]
-/// Build the system prompt for commit message generation.
 fn build_system_prompt() -> String {
     r#"You are an expert at writing clear, conventional commit messages. 
 Your task is to analyze code changes and propose multiple atomic commit messages 
@@ -135,7 +127,6 @@ Return your response as a list of commit messages, one per line."#
 }
 
 #[cfg(feature = "ai")]
-/// Build the user prompt with diff context.
 fn build_user_prompt(diff_summary: &str) -> String {
     format!(
         "Analyze the following code changes and propose multiple atomic commit messages:\n\n{}",
@@ -144,7 +135,6 @@ fn build_user_prompt(diff_summary: &str) -> String {
 }
 
 #[cfg(feature = "ai")]
-/// Parse AI response into individual commit messages.
 fn parse_ai_response(response: &str) -> Result<Vec<String>, GenerationError> {
     let messages: Vec<String> = response
         .lines()
@@ -163,7 +153,6 @@ fn parse_ai_response(response: &str) -> Result<Vec<String>, GenerationError> {
 }
 
 #[cfg(feature = "ai")]
-/// Generate a single commit message for all changes (alternative mode).
 pub async fn generate_single_commit_message(
     diffs: &[FileDiff],
     files: &[ChangedFile],
