@@ -1,15 +1,3 @@
-//! Safety checkpoint creation (Module 9).
-//!
-//! Creates a reliable recovery point before SmartCommit performs any
-//! commit operation. This module never modifies commit history —
-//! the only Git write it performs is creating a new ref under
-//! `refs/smc/backups/`, which:
-//! - never touches an existing branch or HEAD,
-//! - never shows up in `git branch` (confirmed empirically — a ref
-//!   outside `refs/heads/` is invisible to that listing),
-//! - is exactly the "native Git reference" mechanism ARCHITECTURE.md
-//!   §24 calls for, rather than copying the repository.
-
 use crate::{
     inspect_repository_state, ChangedFile, InspectorError, Repository, RepositoryError,
     RepositoryState,
@@ -18,26 +6,10 @@ use chrono::{DateTime, Utc};
 use std::path::Path;
 use std::process::Command;
 
-/// A recorded pre-operation state, sufficient to know where the
-/// repository was before SmartCommit made any commits.
-///
-/// Beyond the three fields modules.md's own example shows
-/// (`original_head`, `branch`, `backup_ref`), this also carries
-/// `created_at` (named explicitly in ARCHITECTURE.md §24's version
-/// of this struct, which modules.md's own text omits) and a snapshot
-/// of the repository state and staged files at checkpoint time —
-/// modules.md's Requirements section explicitly says to capture
-/// "Repository state" and "Staged changes", not just HEAD and
-/// branch, even though its own struct sketch doesn't list fields for
-/// them. Restoring (Module 12) will want this context without having
-/// to reconstruct it after the fact.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SafetyCheckpoint {
-    /// The full HEAD commit hash at checkpoint time.
     pub original_head: String,
-    /// `None` if HEAD was detached at checkpoint time.
     pub branch: Option<String>,
-    /// Full ref name, e.g. `refs/smc/backups/20260901T090000Z`.
     pub backup_ref: String,
     pub created_at: DateTime<Utc>,
     pub repository_state: RepositoryState,
@@ -68,18 +40,6 @@ pub enum CheckpointError {
     RefCreationFailed(String),
 }
 
-/// Creates a safety checkpoint for the repository at `path`, at the
-/// given `now` (passed in rather than read from the system clock —
-/// same testability rationale as Module 8's `generate_timeline`:
-/// deterministic tests without mocking the global clock, and it lets
-/// a caller force a same-timestamp collision on demand to exercise
-/// the collision-handling path directly).
-///
-/// All read-only gathering (HEAD, branch, repository state, staged
-/// files) happens *before* the one mutating step (creating the
-/// backup ref). If any gathering step fails, nothing has been
-/// written — satisfying modules.md's rule: "If checkpoint creation
-/// fails: Abort. Do not modify repository history."
 pub fn create_safety_checkpoint(
     path: impl AsRef<Path>,
     now: DateTime<Utc>,
@@ -103,11 +63,6 @@ pub fn create_safety_checkpoint(
     })
 }
 
-/// Reads the full HEAD commit hash. Distinguishes "HEAD doesn't
-/// resolve because there are no commits yet" (a real, expected state
-/// for a brand-new repo — `NoCommits`) from "git itself couldn't be
-/// run" (`GitUnavailable`) by checking whether git ran at all versus
-/// merely reporting failure.
 pub(crate) fn read_head(repo_root: &Path) -> Result<String, CheckpointError> {
     let output = Command::new("git")
         .arg("-C")
@@ -127,7 +82,6 @@ pub(crate) fn read_head(repo_root: &Path) -> Result<String, CheckpointError> {
     Ok(head)
 }
 
-/// Reads the current branch name, or `None` if HEAD is detached.
 pub(crate) fn read_branch(repo_root: &Path) -> Result<Option<String>, CheckpointError> {
     let output = Command::new("git")
         .arg("-C")
@@ -137,8 +91,6 @@ pub(crate) fn read_branch(repo_root: &Path) -> Result<Option<String>, Checkpoint
         .map_err(|e| CheckpointError::GitUnavailable(e.to_string()))?;
 
     if !output.status.success() {
-        // Non-zero here means detached HEAD (no symbolic ref), which
-        // is a normal state, not an error.
         return Ok(None);
     }
 
@@ -150,26 +102,11 @@ pub(crate) fn read_branch(repo_root: &Path) -> Result<Option<String>, Checkpoint
     })
 }
 
-/// Creates a new, previously-nonexistent ref under
-/// `refs/smc/backups/` pointing at `head_oid`, returning its
-/// full name.
-///
-/// Naming collisions (two checkpoints requested with the same `now`,
-/// e.g. two calls within the same second, or — as in the tests — the
-/// exact same injected timestamp) are handled by appending `-1`,
-/// `-2`, etc. until an unused name is found. The actual creation
-/// uses `git update-ref --create-reflog <ref> <oid> ""`, where the
-/// empty old-value argument makes git refuse to overwrite an
-/// existing ref — confirmed empirically (`fatal: ... reference
-/// already exists`, no history modified) — so even a race between
-/// two processes can't silently clobber an existing checkpoint; a
-/// collision just moves on to the next candidate name.
 fn create_backup_ref(
     repo_root: &Path,
     head_oid: &str,
     now: DateTime<Utc>,
 ) -> Result<String, CheckpointError> {
-    // Ref-name-safe: no colons or other characters git refs forbid.
     let timestamp = now.format("%Y%m%dT%H%M%SZ");
 
     const MAX_ATTEMPTS: u32 = 1000;

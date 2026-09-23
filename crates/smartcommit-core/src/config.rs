@@ -1,75 +1,18 @@
-//! Configuration loading for SmartCommit (Module 13).
-//!
-//! SmartCommit can optionally be configured with a `.smc.toml` file
-//! placed at the root of your Git repository. Every field is optional — if the
-//! file doesn't exist, or a field is omitted, the built-in default is used.
-//!
-//! # Resolution order (highest priority first)
-//!
-//! 1. **CLI flag** — always wins. A flag the user typed on the command line
-//!    overrides everything.
-//! 2. **`.smc.toml`** — values from the project config file override
-//!    the built-in defaults when no CLI flag was given.
-//! 3. **Built-in default** — used when neither a CLI flag nor a config value
-//!    was provided.
-//!
-//! # Example `.smc.toml`
-//!
-//! ```toml
-//! [matching]
-//! minimum_confidence = 0.70
-//! ambiguity_margin   = 0.05
-//!
-//! [timeline]
-//! gap_minutes = 15
-//!
-//! [commit]
-//! require_confirmation = true
-//! ```
-//!
-//! All sections and all fields within them are optional. An empty file is
-//! valid and equivalent to having no file at all.
-
 use serde::Deserialize;
 use std::path::Path;
 use thiserror::Error;
 
-// ── Error type ────────────────────────────────────────────────────────────────
-
-/// Errors that can occur while loading or validating `.smc.toml`.
-///
-/// All variants produce a human-readable message suitable for printing
-/// directly to the user. The file is only read and validated once per
-/// command invocation, so these errors appear early, before any Git
-/// work begins.
 #[derive(Debug, Error)]
 pub enum ConfigError {
-    /// The `.smc.toml` file exists but could not be read from
-    /// disk (e.g. a permissions problem). The inner error contains the
-    /// OS-level reason.
     #[error("Could not read .smc.toml: {0}")]
     Io(#[from] std::io::Error),
 
-    /// The file was read successfully but is not valid TOML, or contains
-    /// keys that do not match the expected structure. The inner string
-    /// contains the parser's error message.
     #[error("Could not parse .smc.toml: {0}")]
     Parse(String),
 
-    /// The TOML parsed correctly but a value is out of its allowed range
-    /// (e.g. `minimum_confidence = 1.5`, `gap_minutes = 0`). The inner
-    /// string names the offending field and its constraint.
     #[error("Invalid configuration: {0}")]
     Validation(String),
 }
-
-// ── Raw (deserialization) types ───────────────────────────────────────────────
-//
-// These private structs mirror the TOML structure exactly, with every field
-// wrapped in `Option` so that serde can tell the difference between "field
-// was absent" (None) and "field was present with a value" (Some). After
-// deserialization they are validated and converted into the public config
-// types below, which use plain values and supply defaults for any `None`.
 
 #[derive(Debug, Deserialize, Default)]
 struct RawConfig {
@@ -96,114 +39,35 @@ struct RawCommitConfig {
     require_confirmation: Option<bool>,
 }
 
-// ── Public config types ───────────────────────────────────────────────────────
-
-/// The fully resolved SmartCommit configuration.
-///
-/// Produced by [`load_config`]. Every field is guaranteed to hold a valid,
-/// in-range value — either from the project's `.smc.toml` or from
-/// the built-in defaults. The CLI layer reads this once after repository
-/// discovery and uses it to supply defaults wherever no explicit flag was
-/// given by the user.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SmartCommitConfig {
-    /// Controls how the file matcher assigns staged files to commit messages.
     pub matching: MatchingConfig,
-    /// Controls how the timeline engine spaces commits in time.
     pub timeline: TimelineConfig,
-    /// Controls interactive behaviour of the `commit` subcommand.
     pub commit: CommitConfig,
 }
 
-/// Thresholds that govern the file-to-message matching step (Module 6/7).
-///
-/// These values correspond to the `MIN_ASSIGNMENT_SCORE` and
-/// `AMBIGUITY_MARGIN` constants that were previously hardcoded in
-/// `planner.rs`. Making them configurable lets teams with very different
-/// codebase layouts tune the matcher without recompiling.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchingConfig {
-    /// The lowest match score at which a file will be assigned to a commit
-    /// message. Files whose best candidate scores below this threshold are
-    /// left unassigned rather than placed into a low-confidence group.
-    ///
-    /// Valid range: `0.0..=1.0`. Default: `0.3`.
     pub minimum_confidence: f32,
 
-    /// If a file's top two candidate messages are within this margin of
-    /// each other (and the second-best score is real evidence, not zero),
-    /// the file is considered ambiguous and left unassigned instead of
-    /// being arbitrarily assigned to the higher-scoring message.
-    ///
-    /// Valid range: `0.0..=1.0`. Default: `0.1`.
     pub ambiguity_margin: f32,
 }
 
-/// Timeline spacing used by the `plan` and `commit` subcommands.
-///
-/// Controls the default gap between consecutive commit timestamps. All
-/// values can be overridden at the command line — CLI flags always win
-/// over config values, which in turn win over built-in defaults.
-///
-/// # Fixed vs random mode
-///
-/// - **Fixed mode** (default): every gap between commits is exactly
-///   `gap_minutes`. Activated when neither `random_min_minutes` nor
-///   `random_max_minutes` is set in config, and neither
-///   `--random-min-minutes` nor `--random-max-minutes` is given on
-///   the CLI.
-/// - **Random mode**: each gap is chosen randomly from
-///   `[random_min_minutes, random_max_minutes]`. Activated when both
-///   random fields are set in config, or both random CLI flags are
-///   given. The CLI flags take precedence over config: if either
-///   `--random-min-minutes` or `--random-max-minutes` is given on the
-///   command line, the CLI values are used and config is ignored for
-///   the random range entirely.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimelineConfig {
-    /// The default number of minutes between consecutive commit
-    /// timestamps when using fixed-interval mode and no
-    /// `--interval-minutes` flag is given.
-    ///
-    /// Must be greater than 0. Default: `10`.
     pub gap_minutes: u64,
 
-    /// The lower bound (inclusive) of the random gap range, in minutes.
-    /// Only used when `random_max_minutes` is also set. When both are
-    /// set, random mode becomes the default and `gap_minutes` is ignored
-    /// unless `--interval-minutes` is given on the CLI.
-    ///
-    /// Must be greater than 0 and less than or equal to
-    /// `random_max_minutes`. Default: `5`.
     pub random_min_minutes: Option<u64>,
 
-    /// The upper bound (inclusive) of the random gap range, in minutes.
-    /// Only used when `random_min_minutes` is also set.
-    ///
-    /// Must be greater than or equal to `random_min_minutes`.
-    /// Default: `30`.
     pub random_max_minutes: Option<u64>,
 }
 
-/// Behaviour of the interactive confirmation prompt in `smc commit`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommitConfig {
-    /// When `true` (the default), `smc commit` asks for explicit
-    /// confirmation before creating any commits. Set to `false` to make
-    /// non-interactive execution the default (equivalent to always passing
-    /// `--yes`). The `--yes` CLI flag still overrides this when it is
-    /// provided.
     pub require_confirmation: bool,
 }
 
-// ── Default implementations ───────────────────────────────────────────────────
-
 impl Default for MatchingConfig {
-    /// Returns the same values that were previously hardcoded as
-    /// `MIN_ASSIGNMENT_SCORE` (0.3) and `AMBIGUITY_MARGIN` (0.1) in
-    /// `planner.rs`. These are the values used when no config file exists
-    /// and no CLI flags are given, preserving the pre-Module-13 behaviour
-    /// exactly.
     fn default() -> Self {
         Self {
             minimum_confidence: 0.3,
@@ -213,11 +77,6 @@ impl Default for MatchingConfig {
 }
 
 impl Default for TimelineConfig {
-    /// Returns the same 10-minute fixed interval that was previously the
-    /// hardcoded `--interval-minutes` default in the CLI. `random_min_minutes`
-    /// and `random_max_minutes` default to `None`, meaning fixed mode is
-    /// used unless the user explicitly opts into random mode via config or
-    /// CLI flags.
     fn default() -> Self {
         Self {
             gap_minutes: 10,
@@ -235,33 +94,9 @@ impl Default for CommitConfig {
     }
 }
 
-// ── Loader ────────────────────────────────────────────────────────────────────
-
-/// Loads the SmartCommit configuration for the repository rooted at
-/// `repo_root`.
-///
-/// Looks for `<repo_root>/.smc.toml`. If the file does not exist,
-/// [`SmartCommitConfig::default`] is returned silently — the absence of a
-/// config file is not an error. If the file exists but cannot be read,
-/// parsed, or passes validation, a [`ConfigError`] is returned.
-///
-/// # Resolution order
-///
-/// This function only handles the config-file layer. It is the caller's
-/// responsibility to apply CLI-flag overrides on top of the returned config,
-/// so that the documented resolution order (CLI > config > default) is
-/// respected end-to-end.
-///
-/// # Errors
-///
-/// - [`ConfigError::Io`] — file exists but could not be read.
-/// - [`ConfigError::Parse`] — file is not valid TOML or has unrecognised
-///   structure.
-/// - [`ConfigError::Validation`] — a value is out of its allowed range.
 pub fn load_config(repo_root: &Path) -> Result<SmartCommitConfig, ConfigError> {
     let config_path = repo_root.join(".smc.toml");
 
-    // A missing file is not an error — just use defaults.
     if !config_path.exists() {
         return Ok(SmartCommitConfig::default());
     }
@@ -270,7 +105,6 @@ pub fn load_config(repo_root: &Path) -> Result<SmartCommitConfig, ConfigError> {
 
     let raw: RawConfig = toml::from_str(&text).map_err(|e| ConfigError::Parse(e.to_string()))?;
 
-    // ── [matching] ────────────────────────────────────────────────────────────
     let matching = {
         let raw = raw.matching.unwrap_or_default();
         let defaults = MatchingConfig::default();
@@ -296,7 +130,6 @@ pub fn load_config(repo_root: &Path) -> Result<SmartCommitConfig, ConfigError> {
         }
     };
 
-    // ── [timeline] ────────────────────────────────────────────────────────────
     let timeline = {
         let raw = raw.timeline.unwrap_or_default();
         let gap_minutes = raw
@@ -309,10 +142,6 @@ pub fn load_config(repo_root: &Path) -> Result<SmartCommitConfig, ConfigError> {
             ));
         }
 
-        // random_min and random_max must both be present or both absent.
-        // If only one is set, that's a configuration error — the user
-        // almost certainly forgot to add the other, and silently ignoring
-        // it would produce unexpected fixed-mode behaviour.
         let (random_min_minutes, random_max_minutes) = match (
             raw.random_min_minutes,
             raw.random_max_minutes,
@@ -350,7 +179,6 @@ pub fn load_config(repo_root: &Path) -> Result<SmartCommitConfig, ConfigError> {
         }
     };
 
-    // ── [commit] ─────────────────────────────────────────────────────────────
     let commit = {
         let raw = raw.commit.unwrap_or_default();
         CommitConfig {
@@ -367,8 +195,6 @@ pub fn load_config(repo_root: &Path) -> Result<SmartCommitConfig, ConfigError> {
     })
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -378,8 +204,6 @@ mod tests {
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-    /// Creates a unique temporary directory for one test, matching the
-    /// pattern used by the rest of smartcommit-core's test suite.
     fn temp_dir() -> PathBuf {
         let n = COUNTER.fetch_add(1, Ordering::SeqCst);
         let dir = std::env::temp_dir().join(format!(
@@ -394,11 +218,8 @@ mod tests {
         fs::write(dir.join(".smc.toml"), content).expect("failed to write .smc.toml in temp dir");
     }
 
-    // ── Happy-path tests ──────────────────────────────────────────────────────
-
     #[test]
     fn returns_defaults_when_no_file_exists() {
-        // The absence of .smc.toml must never be an error.
         let dir = temp_dir();
         let config = load_config(&dir).unwrap();
         assert_eq!(config, SmartCommitConfig::default());
@@ -431,8 +252,6 @@ require_confirmation = false
 
     #[test]
     fn partial_config_fills_missing_fields_with_defaults() {
-        // Only [timeline] is specified; the other sections must fall back
-        // to their built-in defaults rather than being treated as errors.
         let dir = temp_dir();
         write_config(&dir, "[timeline]\ngap_minutes = 5\n");
 
@@ -445,15 +264,12 @@ require_confirmation = false
 
     #[test]
     fn empty_file_is_equivalent_to_no_file() {
-        // An empty .smc.toml is valid TOML and must return defaults.
         let dir = temp_dir();
         write_config(&dir, "");
 
         let config = load_config(&dir).unwrap();
         assert_eq!(config, SmartCommitConfig::default());
     }
-
-    // ── Error tests ───────────────────────────────────────────────────────────
 
     #[test]
     fn rejects_invalid_toml_syntax() {
@@ -495,7 +311,6 @@ require_confirmation = false
 
     #[test]
     fn rejects_zero_gap_minutes() {
-        // A gap of 0 would make all commits land at the same timestamp.
         let dir = temp_dir();
         write_config(&dir, "[timeline]\ngap_minutes = 0\n");
         let err = load_config(&dir).unwrap_err();
@@ -519,7 +334,6 @@ random_max_minutes = 30
         let config = load_config(&dir).unwrap();
         assert_eq!(config.timeline.random_min_minutes, Some(5));
         assert_eq!(config.timeline.random_max_minutes, Some(30));
-        // gap_minutes still defaults when not specified
         assert_eq!(
             config.timeline.gap_minutes,
             TimelineConfig::default().gap_minutes
@@ -528,7 +342,6 @@ random_max_minutes = 30
 
     #[test]
     fn rejects_random_min_without_max() {
-        // Both fields must be provided together — one alone is a config error.
         let dir = temp_dir();
         write_config(&dir, "[timeline]\nrandom_min_minutes = 5\n");
         let err = load_config(&dir).unwrap_err();
