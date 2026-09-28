@@ -18,6 +18,8 @@ pub mod provider;
 pub mod semantic_analysis;
 #[cfg(feature = "ai")]
 pub mod semantic_matcher;
+#[cfg(feature = "ai")]
+pub mod structure_analyzer;
 
 #[cfg(feature = "ai")]
 pub use config::{
@@ -40,3 +42,8 @@ pub use semantic_analysis::{
 };
 #[cfg(feature = "ai")]
 pub use semantic_matcher::{semantic_file_matching, SemanticMatchError};
+#[cfg(feature = "ai")]
+pub use structure_analyzer::{
+    analyze_structure_ambiguity, should_use_ai_analysis, StructureAnalysis, StructureAnalysisError,
+    StructureAnalysisRequest,
+};

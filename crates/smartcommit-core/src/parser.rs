@@ -1,5 +1,5 @@
 use crate::diff::StructureInfo;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub fn detect_language(path: &Path) -> String {
     match path.extension().and_then(|e| e.to_str()) {
@@ -25,17 +25,18 @@ pub fn detect_language(path: &Path) -> String {
 
 pub fn parse_file_structures(path: &Path, content: &str) -> Option<Vec<StructureInfo>> {
     let language = detect_language(path);
+    let file_path = path.to_path_buf();
     
     match language.as_str() {
-        "rust" => parse_rust_structures(content),
-        "python" => parse_python_structures(content),
-        "javascript" | "typescript" => parse_javascript_structures(content),
-        "php" => parse_php_structures(content),
-        "java" => parse_java_structures(content),
-        "csharp" => parse_csharp_structures(content),
-        "go" => parse_go_structures(content),
-        "c" => parse_c_structures(content),
-        "cpp" => parse_cpp_structures(content),
+        "rust" => parse_rust_structures(content, file_path),
+        "python" => parse_python_structures(content, file_path),
+        "javascript" | "typescript" => parse_javascript_structures(content, file_path),
+        "php" => parse_php_structures(content, file_path),
+        "java" => parse_java_structures(content, file_path),
+        "csharp" => parse_csharp_structures(content, file_path),
+        "go" => parse_go_structures(content, file_path),
+        "c" => parse_c_structures(content, file_path),
+        "cpp" => parse_cpp_structures(content, file_path),
         _ => None,
     }
 }
@@ -47,7 +48,7 @@ pub fn find_structure_at_line(structures: &[StructureInfo], line: usize) -> Opti
 }
 
 #[cfg(feature = "tree-sitter-rust")]
-fn parse_rust_structures(content: &str) -> Option<Vec<StructureInfo>> {
+fn parse_rust_structures(content: &str, file_path: PathBuf) -> Option<Vec<StructureInfo>> {
     use tree_sitter::Parser;
     
     let mut parser = Parser::new();
@@ -59,18 +60,18 @@ fn parse_rust_structures(content: &str) -> Option<Vec<StructureInfo>> {
     let root_node = tree.root_node();
     
     let mut structures = Vec::new();
-    extract_rust_nodes(&root_node, content, &mut structures);
+    extract_rust_nodes(&root_node, content, &mut structures, file_path);
     
     Some(structures)
 }
 
 #[cfg(not(feature = "tree-sitter-rust"))]
-fn parse_rust_structures(_content: &str) -> Option<Vec<StructureInfo>> {
+fn parse_rust_structures(_content: &str, _file_path: PathBuf) -> Option<Vec<StructureInfo>> {
     None
 }
 
 #[cfg(feature = "tree-sitter-rust")]
-fn extract_rust_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>) {
+fn extract_rust_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>, file_path: PathBuf) {
     match node.kind() {
         "function_item" => {
             if let Some(name) = extract_function_name(node, source) {
@@ -80,6 +81,7 @@ fn extract_rust_nodes(node: &tree_sitter::Node, source: &str, structures: &mut V
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "rust".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -91,6 +93,7 @@ fn extract_rust_nodes(node: &tree_sitter::Node, source: &str, structures: &mut V
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "rust".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -102,6 +105,7 @@ fn extract_rust_nodes(node: &tree_sitter::Node, source: &str, structures: &mut V
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "rust".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -113,6 +117,7 @@ fn extract_rust_nodes(node: &tree_sitter::Node, source: &str, structures: &mut V
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "rust".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -124,6 +129,7 @@ fn extract_rust_nodes(node: &tree_sitter::Node, source: &str, structures: &mut V
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "rust".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -135,6 +141,7 @@ fn extract_rust_nodes(node: &tree_sitter::Node, source: &str, structures: &mut V
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "rust".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -143,7 +150,7 @@ fn extract_rust_nodes(node: &tree_sitter::Node, source: &str, structures: &mut V
     
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        extract_rust_nodes(&child, source, structures);
+        extract_rust_nodes(&child, source, structures, file_path.clone());
     }
 }
 
@@ -208,7 +215,7 @@ fn extract_impl_name(node: &tree_sitter::Node, source: &str) -> Option<String> {
 }
 
 #[cfg(feature = "tree-sitter-python")]
-fn parse_python_structures(content: &str) -> Option<Vec<StructureInfo>> {
+fn parse_python_structures(content: &str, file_path: PathBuf) -> Option<Vec<StructureInfo>> {
     use tree_sitter::Parser;
     
     let mut parser = Parser::new();
@@ -220,18 +227,18 @@ fn parse_python_structures(content: &str) -> Option<Vec<StructureInfo>> {
     let root_node = tree.root_node();
     
     let mut structures = Vec::new();
-    extract_python_nodes(&root_node, content, &mut structures);
+    extract_python_nodes(&root_node, content, &mut structures, file_path);
     
     Some(structures)
 }
 
 #[cfg(not(feature = "tree-sitter-python"))]
-fn parse_python_structures(_content: &str) -> Option<Vec<StructureInfo>> {
+fn parse_python_structures(_content: &str, _file_path: PathBuf) -> Option<Vec<StructureInfo>> {
     None
 }
 
 #[cfg(feature = "tree-sitter-python")]
-fn extract_python_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>) {
+fn extract_python_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>, file_path: PathBuf) {
     match node.kind() {
         "function_definition" => {
             if let Some(name) = extract_python_function_name(node, source) {
@@ -241,6 +248,7 @@ fn extract_python_nodes(node: &tree_sitter::Node, source: &str, structures: &mut
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "python".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -252,6 +260,7 @@ fn extract_python_nodes(node: &tree_sitter::Node, source: &str, structures: &mut
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "python".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -263,6 +272,7 @@ fn extract_python_nodes(node: &tree_sitter::Node, source: &str, structures: &mut
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "python".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -271,7 +281,7 @@ fn extract_python_nodes(node: &tree_sitter::Node, source: &str, structures: &mut
     
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        extract_python_nodes(&child, source, structures);
+        extract_python_nodes(&child, source, structures, file_path.clone());
     }
 }
 
@@ -306,7 +316,7 @@ fn extract_python_module_name(node: &tree_sitter::Node, source: &str) -> Option<
 }
 
 #[cfg(any(feature = "tree-sitter-javascript", feature = "tree-sitter-typescript"))]
-fn parse_javascript_structures(content: &str) -> Option<Vec<StructureInfo>> {
+fn parse_javascript_structures(content: &str, file_path: PathBuf) -> Option<Vec<StructureInfo>> {
     use tree_sitter::Parser;
     
     let mut parser = Parser::new();
@@ -343,18 +353,18 @@ fn parse_javascript_structures(content: &str) -> Option<Vec<StructureInfo>> {
     let root_node = tree.root_node();
     
     let mut structures = Vec::new();
-    extract_javascript_nodes(&root_node, content, &mut structures, lang_name);
+    extract_javascript_nodes(&root_node, content, &mut structures, lang_name, file_path);
     
     Some(structures)
 }
 
 #[cfg(not(any(feature = "tree-sitter-javascript", feature = "tree-sitter-typescript")))]
-fn parse_javascript_structures(_content: &str) -> Option<Vec<StructureInfo>> {
+fn parse_javascript_structures(_content: &str, _file_path: PathBuf) -> Option<Vec<StructureInfo>> {
     None
 }
 
 #[cfg(any(feature = "tree-sitter-javascript", feature = "tree-sitter-typescript"))]
-fn extract_javascript_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>, lang_name: &str) {
+fn extract_javascript_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>, lang_name: &str, file_path: PathBuf) {
     match node.kind() {
         "function_declaration" | "function_expression" | "arrow_function" => {
             if let Some(name) = extract_javascript_function_name(node, source) {
@@ -364,6 +374,7 @@ fn extract_javascript_nodes(node: &tree_sitter::Node, source: &str, structures: 
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: lang_name.to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -375,6 +386,7 @@ fn extract_javascript_nodes(node: &tree_sitter::Node, source: &str, structures: 
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: lang_name.to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -386,6 +398,7 @@ fn extract_javascript_nodes(node: &tree_sitter::Node, source: &str, structures: 
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: lang_name.to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -397,6 +410,7 @@ fn extract_javascript_nodes(node: &tree_sitter::Node, source: &str, structures: 
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: lang_name.to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -412,6 +426,7 @@ fn extract_javascript_nodes(node: &tree_sitter::Node, source: &str, structures: 
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: lang_name.to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -420,7 +435,7 @@ fn extract_javascript_nodes(node: &tree_sitter::Node, source: &str, structures: 
     
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        extract_javascript_nodes(&child, source, structures, lang_name);
+        extract_javascript_nodes(&child, source, structures, lang_name, file_path.clone());
     }
 }
 
@@ -479,7 +494,7 @@ fn extract_javascript_import_export_name(node: &tree_sitter::Node, source: &str)
 }
 
 #[cfg(feature = "tree-sitter-php")]
-fn parse_php_structures(content: &str) -> Option<Vec<StructureInfo>> {
+fn parse_php_structures(content: &str, file_path: PathBuf) -> Option<Vec<StructureInfo>> {
     use tree_sitter::Parser;
     
     let mut parser = Parser::new();
@@ -491,18 +506,18 @@ fn parse_php_structures(content: &str) -> Option<Vec<StructureInfo>> {
     let root_node = tree.root_node();
     
     let mut structures = Vec::new();
-    extract_php_nodes(&root_node, content, &mut structures);
+    extract_php_nodes(&root_node, content, &mut structures, file_path);
     
     Some(structures)
 }
 
 #[cfg(not(feature = "tree-sitter-php"))]
-fn parse_php_structures(_content: &str) -> Option<Vec<StructureInfo>> {
+fn parse_php_structures(_content: &str, _file_path: PathBuf) -> Option<Vec<StructureInfo>> {
     None
 }
 
 #[cfg(feature = "tree-sitter-php")]
-fn extract_php_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>) {
+fn extract_php_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>, file_path: PathBuf) {
     match node.kind() {
         "function_definition" => {
             if let Some(name) = extract_php_function_name(node, source) {
@@ -512,6 +527,7 @@ fn extract_php_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Ve
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "php".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -523,6 +539,7 @@ fn extract_php_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Ve
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "php".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -534,6 +551,7 @@ fn extract_php_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Ve
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "php".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -545,6 +563,7 @@ fn extract_php_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Ve
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "php".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -553,7 +572,7 @@ fn extract_php_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Ve
     
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        extract_php_nodes(&child, source, structures);
+        extract_php_nodes(&child, source, structures, file_path.clone());
     }
 }
 
@@ -610,7 +629,7 @@ fn extract_php_interface_name(node: &tree_sitter::Node, source: &str) -> Option<
 }
 
 #[cfg(feature = "tree-sitter-java")]
-fn parse_java_structures(content: &str) -> Option<Vec<StructureInfo>> {
+fn parse_java_structures(content: &str, file_path: PathBuf) -> Option<Vec<StructureInfo>> {
     use tree_sitter::Parser;
     
     let mut parser = Parser::new();
@@ -622,18 +641,18 @@ fn parse_java_structures(content: &str) -> Option<Vec<StructureInfo>> {
     let root_node = tree.root_node();
     
     let mut structures = Vec::new();
-    extract_java_nodes(&root_node, content, &mut structures);
+    extract_java_nodes(&root_node, content, &mut structures, file_path);
     
     Some(structures)
 }
 
 #[cfg(not(feature = "tree-sitter-java"))]
-fn parse_java_structures(_content: &str) -> Option<Vec<StructureInfo>> {
+fn parse_java_structures(_content: &str, _file_path: PathBuf) -> Option<Vec<StructureInfo>> {
     None
 }
 
 #[cfg(feature = "tree-sitter-java")]
-fn extract_java_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>) {
+fn extract_java_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>, file_path: PathBuf) {
     match node.kind() {
         "method_declaration" => {
             if let Some(name) = extract_java_method_name(node, source) {
@@ -643,6 +662,7 @@ fn extract_java_nodes(node: &tree_sitter::Node, source: &str, structures: &mut V
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "java".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -654,6 +674,7 @@ fn extract_java_nodes(node: &tree_sitter::Node, source: &str, structures: &mut V
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "java".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -665,6 +686,7 @@ fn extract_java_nodes(node: &tree_sitter::Node, source: &str, structures: &mut V
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "java".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -673,7 +695,7 @@ fn extract_java_nodes(node: &tree_sitter::Node, source: &str, structures: &mut V
     
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        extract_java_nodes(&child, source, structures);
+        extract_java_nodes(&child, source, structures, file_path.clone());
     }
 }
 
@@ -708,7 +730,7 @@ fn extract_java_interface_name(node: &tree_sitter::Node, source: &str) -> Option
 }
 
 #[cfg(feature = "tree-sitter-c-sharp")]
-fn parse_csharp_structures(content: &str) -> Option<Vec<StructureInfo>> {
+fn parse_csharp_structures(content: &str, file_path: PathBuf) -> Option<Vec<StructureInfo>> {
     use tree_sitter::Parser;
     
     let mut parser = Parser::new();
@@ -720,18 +742,18 @@ fn parse_csharp_structures(content: &str) -> Option<Vec<StructureInfo>> {
     let root_node = tree.root_node();
     
     let mut structures = Vec::new();
-    extract_csharp_nodes(&root_node, content, &mut structures);
+    extract_csharp_nodes(&root_node, content, &mut structures, file_path);
     
     Some(structures)
 }
 
 #[cfg(not(feature = "tree-sitter-c-sharp"))]
-fn parse_csharp_structures(_content: &str) -> Option<Vec<StructureInfo>> {
+fn parse_csharp_structures(_content: &str, _file_path: PathBuf) -> Option<Vec<StructureInfo>> {
     None
 }
 
 #[cfg(feature = "tree-sitter-c-sharp")]
-fn extract_csharp_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>) {
+fn extract_csharp_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>, file_path: PathBuf) {
     match node.kind() {
         "method_declaration" => {
             if let Some(name) = extract_csharp_method_name(node, source) {
@@ -741,6 +763,7 @@ fn extract_csharp_nodes(node: &tree_sitter::Node, source: &str, structures: &mut
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "csharp".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -752,6 +775,7 @@ fn extract_csharp_nodes(node: &tree_sitter::Node, source: &str, structures: &mut
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "csharp".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -763,6 +787,7 @@ fn extract_csharp_nodes(node: &tree_sitter::Node, source: &str, structures: &mut
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "csharp".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -771,7 +796,7 @@ fn extract_csharp_nodes(node: &tree_sitter::Node, source: &str, structures: &mut
     
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        extract_csharp_nodes(&child, source, structures);
+        extract_csharp_nodes(&child, source, structures, file_path.clone());
     }
 }
 
@@ -806,7 +831,7 @@ fn extract_csharp_interface_name(node: &tree_sitter::Node, source: &str) -> Opti
 }
 
 #[cfg(feature = "tree-sitter-go")]
-fn parse_go_structures(content: &str) -> Option<Vec<StructureInfo>> {
+fn parse_go_structures(content: &str, file_path: PathBuf) -> Option<Vec<StructureInfo>> {
     use tree_sitter::Parser;
     
     let mut parser = Parser::new();
@@ -818,18 +843,18 @@ fn parse_go_structures(content: &str) -> Option<Vec<StructureInfo>> {
     let root_node = tree.root_node();
     
     let mut structures = Vec::new();
-    extract_go_nodes(&root_node, content, &mut structures);
+    extract_go_nodes(&root_node, content, &mut structures, file_path);
     
     Some(structures)
 }
 
 #[cfg(not(feature = "tree-sitter-go"))]
-fn parse_go_structures(_content: &str) -> Option<Vec<StructureInfo>> {
+fn parse_go_structures(_content: &str, _file_path: PathBuf) -> Option<Vec<StructureInfo>> {
     None
 }
 
 #[cfg(feature = "tree-sitter-go")]
-fn extract_go_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>) {
+fn extract_go_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>, file_path: PathBuf) {
     match node.kind() {
         "function_declaration" => {
             if let Some(name) = extract_go_function_name(node, source) {
@@ -839,6 +864,7 @@ fn extract_go_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "go".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -850,21 +876,23 @@ fn extract_go_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "go".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
-        "struct_type" => {
-            if let Some(name) = extract_go_struct_name(node, source) {
+        "type_declaration" => {
+            if let Some(name) = extract_go_type_name(node, source) {
                 structures.push(StructureInfo {
                     name,
                     kind: StructureKind::Struct,
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "go".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
-        "interface_type" => {
+        "interface_declaration" => {
             if let Some(name) = extract_go_interface_name(node, source) {
                 structures.push(StructureInfo {
                     name,
@@ -872,6 +900,7 @@ fn extract_go_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "go".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -880,7 +909,7 @@ fn extract_go_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec
     
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        extract_go_nodes(&child, source, structures);
+        extract_go_nodes(&child, source, structures, file_path.clone());
     }
 }
 
@@ -925,7 +954,7 @@ fn extract_go_interface_name(node: &tree_sitter::Node, source: &str) -> Option<S
 }
 
 #[cfg(feature = "tree-sitter-c")]
-fn parse_c_structures(content: &str) -> Option<Vec<StructureInfo>> {
+fn parse_c_structures(content: &str, file_path: PathBuf) -> Option<Vec<StructureInfo>> {
     use tree_sitter::Parser;
     
     let mut parser = Parser::new();
@@ -937,18 +966,18 @@ fn parse_c_structures(content: &str) -> Option<Vec<StructureInfo>> {
     let root_node = tree.root_node();
     
     let mut structures = Vec::new();
-    extract_c_nodes(&root_node, content, &mut structures);
+    extract_c_nodes(&root_node, content, &mut structures, file_path);
     
     Some(structures)
 }
 
 #[cfg(not(feature = "tree-sitter-c"))]
-fn parse_c_structures(_content: &str) -> Option<Vec<StructureInfo>> {
+fn parse_c_structures(_content: &str, _file_path: PathBuf) -> Option<Vec<StructureInfo>> {
     None
 }
 
 #[cfg(feature = "tree-sitter-c")]
-fn extract_c_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>) {
+fn extract_c_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>, file_path: PathBuf) {
     match node.kind() {
         "function_definition" => {
             if let Some(name) = extract_c_function_name(node, source) {
@@ -958,6 +987,7 @@ fn extract_c_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "c".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -969,6 +999,7 @@ fn extract_c_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "c".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -980,6 +1011,7 @@ fn extract_c_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "c".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -988,7 +1020,7 @@ fn extract_c_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<
     
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        extract_c_nodes(&child, source, structures);
+        extract_c_nodes(&child, source, structures, file_path.clone());
     }
 }
 
@@ -1030,7 +1062,7 @@ fn extract_c_enum_name(node: &tree_sitter::Node, source: &str) -> Option<String>
 }
 
 #[cfg(feature = "tree-sitter-cpp")]
-fn parse_cpp_structures(content: &str) -> Option<Vec<StructureInfo>> {
+fn parse_cpp_structures(content: &str, file_path: PathBuf) -> Option<Vec<StructureInfo>> {
     use tree_sitter::Parser;
     
     let mut parser = Parser::new();
@@ -1042,18 +1074,18 @@ fn parse_cpp_structures(content: &str) -> Option<Vec<StructureInfo>> {
     let root_node = tree.root_node();
     
     let mut structures = Vec::new();
-    extract_cpp_nodes(&root_node, content, &mut structures);
+    extract_cpp_nodes(&root_node, content, &mut structures, file_path);
     
     Some(structures)
 }
 
 #[cfg(not(feature = "tree-sitter-cpp"))]
-fn parse_cpp_structures(_content: &str) -> Option<Vec<StructureInfo>> {
+fn parse_cpp_structures(_content: &str, _file_path: PathBuf) -> Option<Vec<StructureInfo>> {
     None
 }
 
 #[cfg(feature = "tree-sitter-cpp")]
-fn extract_cpp_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>) {
+fn extract_cpp_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Vec<StructureInfo>, file_path: PathBuf) {
     match node.kind() {
         "function_definition" => {
             if let Some(name) = extract_cpp_function_name(node, source) {
@@ -1063,6 +1095,7 @@ fn extract_cpp_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Ve
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "cpp".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -1074,6 +1107,7 @@ fn extract_cpp_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Ve
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "cpp".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -1085,6 +1119,7 @@ fn extract_cpp_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Ve
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "cpp".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -1096,6 +1131,7 @@ fn extract_cpp_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Ve
                     start_line: node.start_position().row + 1,
                     end_line: node.end_position().row + 1,
                     language: "cpp".to_string(),
+                    file: file_path.clone(),
                 });
             }
         }
@@ -1104,7 +1140,7 @@ fn extract_cpp_nodes(node: &tree_sitter::Node, source: &str, structures: &mut Ve
     
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        extract_cpp_nodes(&child, source, structures);
+        extract_cpp_nodes(&child, source, structures, file_path.clone());
     }
 }
 
@@ -1150,6 +1186,7 @@ fn extract_cpp_enum_name(node: &tree_sitter::Node, source: &str) -> Option<Strin
 
 #[cfg(test)]
 mod tests {
+    use crate::diff::StructureKind;
     use super::*;
 
     #[test]
@@ -1278,6 +1315,7 @@ mod auth {
                 start_line: 1,
                 end_line: 10,
                 language: "rust".to_string(),
+                file: PathBuf::from("test.rs"),
             },
             StructureInfo {
                 name: "func2".to_string(),
@@ -1285,6 +1323,7 @@ mod auth {
                 start_line: 15,
                 end_line: 25,
                 language: "rust".to_string(),
+                file: PathBuf::from("test.rs"),
             },
         ];
         

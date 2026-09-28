@@ -18,7 +18,7 @@ pub struct HunkStats {
     pub total_changed_lines: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum StructureKind {
     Function,
     Method,
@@ -58,6 +58,7 @@ pub struct StructureInfo {
     pub start_line: usize,
     pub end_line: usize,
     pub language: String,
+    pub file: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,7 +73,7 @@ pub struct DiffHunk {
     pub lines: Vec<DiffLine>,
     pub raw_content: String,
     pub stats: HunkStats,
-    pub structure: Option<StructureInfo>,
+    pub structures: Vec<StructureInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -178,9 +179,16 @@ fn parse_unified_diff(diff_text: &str, repo_root: &std::path::Path) -> Vec<FileD
         let id = format!("{}#{}", f.path.display(), *hunk_index_in_file);
         *hunk_index_in_file += 1;
 
-        // Find the structure that contains this hunk
-        let structure = crate::parser::find_structure_at_line(structures, new_start)
-            .cloned();
+        let hunk_end = new_start + new_count;
+        let structures: Vec<StructureInfo> = structures
+            .iter()
+            .filter(|s| {
+                let structure_end = s.end_line;
+                let structure_start = s.start_line;
+                structure_start <= hunk_end && structure_end >= new_start
+            })
+            .cloned()
+            .collect();
 
         f.hunks.push(DiffHunk {
             id,
@@ -193,7 +201,7 @@ fn parse_unified_diff(diff_text: &str, repo_root: &std::path::Path) -> Vec<FileD
             lines,
             raw_content: raw_lines.join("\n"),
             stats,
-            structure,
+            structures,
         });
     }
 

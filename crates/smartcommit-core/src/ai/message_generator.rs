@@ -79,9 +79,11 @@ fn summarize_diffs(diffs: &[FileDiff], files: &[ChangedFile]) -> String {
             for (hunk_index, hunk) in diff.hunks.iter().enumerate() {
                 summary.push_str(&format!("  Hunk #{}\n", hunk_index));
                 
-                if let Some(structure) = &hunk.structure {
-                    summary.push_str(&format!("    Structure: {} ({})\n", structure.name, structure.kind));
-                    summary.push_str(&format!("    Language: {}\n", structure.language));
+                if !hunk.structures.is_empty() {
+                    for structure in &hunk.structures {
+                        summary.push_str(&format!("    Structure: {} ({})\n", structure.name, structure.kind));
+                        summary.push_str(&format!("    Language: {}\n", structure.language));
+                    }
                 }
                 
                 for line in &hunk.lines {
