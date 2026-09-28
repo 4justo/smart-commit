@@ -13,6 +13,7 @@ mod message_parser;
 mod operation_record;
 mod parser;
 mod planner;
+mod relationship;
 mod repository;
 mod repository_state;
 mod restore;
@@ -46,6 +47,7 @@ pub use restore::{
     execute_restore, manual_recovery_instructions, plan_restore, RestoreError, RestorePlan,
 };
 pub use parser::{detect_language, find_structure_at_line, parse_file_structures};
+pub use relationship::{find_import_relationships, find_shared_directory_relationships, find_test_files, EvidenceSource, Relationship, RelationshipGraph, RelationshipType};
 pub use staged_changes::{get_staged_changes, ChangeKind, ChangedFile, StagedChangesError};
 pub use timeline::{
     apply_timeline_to_plan, generate_timeline, ApplyTimelineError, PlannedCommitTime, RandomSource,
