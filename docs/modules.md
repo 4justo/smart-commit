@@ -1659,3 +1659,139 @@ Those belong to later releases.
 The priority for v0.1 is:
 
 > **A small, safe, reliable Git engine is more valuable than a large intelligent system that cannot be trusted.**
+
+---
+
+# MODULE 15 — AI Integration Foundation
+
+## Goal
+
+Add AI provider infrastructure for commit message generation and semantic analysis.
+
+## Requirements
+
+Implement AI provider trait with support for:
+- Claude (Anthropic)
+- OpenAI
+- Google Gemini
+- Local LLMs (Ollama)
+
+## Implementation
+
+- Create `AIProvider` trait with `generate_message()` method
+- Implement providers for Claude, OpenAI, Gemini, and Local LLM
+- Add configuration via environment variables and `.smc.toml`
+- Implement fallback mechanism between providers
+- Ensure AI features are optional (feature-gated)
+
+---
+
+# MODULE 16 — AI Commit Message Generation
+
+## Goal
+
+Use AI to automatically generate conventional commit messages from code changes.
+
+## Requirements
+
+- Analyze staged diffs and generate commit messages
+- Support conventional commit format (type: description)
+- Generate multiple atomic commit messages
+- Fall back to keyword matching if AI fails
+
+---
+
+# MODULE 17 — AI Semantic File Matching
+
+## Goal
+
+Use AI to semantically match files to commit messages based on actual code meaning.
+
+## Requirements
+
+- Analyze file changes and commit messages
+- Match files to appropriate commits
+- Combine with deterministic keyword matching
+- Provide confidence scores
+
+---
+
+# MODULE 18 — Code Structure Detection
+
+## Goal
+
+Enhance structural understanding of source code by detecting code structures using Tree-sitter.
+
+## Requirements
+
+- Detect Functions, Methods, Classes, Structs, Interfaces, Modules, Imports, Exports, Traits, Enums
+- Map changed hunks to affected structures
+- Support multiple languages (Rust, Python, JavaScript/TypeScript, PHP, Java, C#, Go, C, C++)
+- Produce structured results with language, type, name, file, line_range
+- Ensure unsupported languages fall back to generic diff analysis
+- Parser failures never crash SmartCommit
+
+## Implementation
+
+- Add `StructureInfo` with `file` field
+- Update all language parsers to pass file paths
+- Change `DiffHunk.structure` to `DiffHunk.structures` (Vec) for multiple structures
+- Implement hunk-to-structure mapping with overlap detection
+- Add AI-assisted structure analysis for ambiguous cases
+
+---
+
+# MODULE 19 — Relationship and Dependency Analysis
+
+## Goal
+
+Analyze relationships between files, hunks, code structures, tests, and dependencies.
+
+## Requirements
+
+- Detect imports and module references.
+- Detect symbol references.
+- Identify shared classes/functions.
+- Detect shared directories.
+- Map tests to implementations.
+- Analyze configuration dependencies.
+- Analyze package dependencies.
+- Create a structured relationship graph.
+- AI may suggest relationships but deterministic and AI evidence must remain distinguishable.
+
+## Implementation
+
+- Test-to-implementation mapping via naming conventions
+- Import/module reference analysis for Rust, Python, JavaScript/TypeScript
+- Shared directory analysis
+- Relationship graph with `RelationshipType` (TestCoverage, Import, SharedDirectory)
+- `EvidenceSource` (Deterministic only - AI evidence separate)
+- Integration with planner to enhance commit grouping
+
+---
+
+# POST-MVP FEATURES
+
+## Installation & Distribution
+
+- Pre-built binaries for Linux, macOS (Apple Silicon & Intel), Windows
+- GitHub Actions release workflow
+- Simple download-and-use experience
+- No coding required for end users
+
+## AI Providers
+
+- Claude (Anthropic)
+- OpenAI
+- Google Gemini
+- Local LLMs (Ollama)
+- Configurable via environment variables or `.smc.toml`
+
+## Configuration
+
+- `.smc.toml` for default behavior
+- AI provider selection
+- Model configuration
+- Generation parameters (max_tokens, temperature)
+- Matching thresholds
+- Timeline settings
