@@ -208,6 +208,10 @@ sudo mv smc /usr/local/bin/
 curl -L https://github.com/4justo/smart-commit/releases/latest/download/smartcommit-darwin-x86_64 -o smc
 chmod +x smc
 sudo mv smc /usr/local/bin/
+
+# Windows (PowerShell)
+Invoke-WebRequest -Uri "https://github.com/4justo/smart-commit/releases/latest/download/smartcommit-windows-x86_64.exe" -OutFile "smc.exe"
+# Add to PATH or move to a directory in PATH
 ```
 
 ### Quick Start

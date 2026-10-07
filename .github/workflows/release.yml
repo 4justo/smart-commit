@@ -24,6 +24,9 @@ jobs:
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: smartcommit-darwin-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: smartcommit-windows-x86_64.exe
 
     steps:
       - name: Checkout code
@@ -81,6 +84,7 @@ jobs:
             artifacts/smartcommit-linux-x86_64
             artifacts/smartcommit-darwin-aarch64
             artifacts/smartcommit-darwin-x86_64
+            artifacts/smartcommit-windows-x86_64.exe
           draft: false
           prerelease: false
         env:
