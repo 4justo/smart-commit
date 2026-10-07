@@ -142,6 +142,8 @@ fn smc_with_stdin(dir: &Path, args: &[&str], stdin_bytes: &[u8]) -> std::process
 fn init_repo(label: &str) -> PathBuf {
     let dir = temp_dir(label);
     git(&dir, &["init", "--quiet"]);
+    git(&dir, &["config", "user.name", "Test User"]);
+    git(&dir, &["config", "user.email", "test@example.com"]);
     write_file(&dir.join("README.md"), "initial\n");
     git(&dir, &["add", "README.md"]);
     git(&dir, &["commit", "--quiet", "-m", "initial commit"]);
