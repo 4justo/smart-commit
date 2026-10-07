@@ -1,4 +1,4 @@
-use crate::{ChangedFile, CommitMessage, MatchScore};
+use crate::{ChangedFile, CommitMessage, MatchScore, RelationshipGraph};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommitGroup {
@@ -126,6 +126,48 @@ pub fn build_commit_plan(
         unassigned,
         warnings,
     }
+}
+
+pub fn enhance_plan_with_relationships(
+    plan: CommitPlan,
+    relationship_graph: &RelationshipGraph,
+    _min_confidence: f32,
+) -> CommitPlan {
+    let mut new_plan = plan;
+    let mut moves: Vec<(usize, ChangedFile, String)> = Vec::new();
+    
+    for (group_idx, group) in new_plan.groups.iter().enumerate() {
+        for file in &group.files {
+            let related = relationship_graph.find_related_files(&file.path);
+            
+            for related_path in related {
+                if let Some(unassigned_idx) = new_plan.unassigned.iter().position(|f| &f.path == related_path) {
+                    let file_to_move = new_plan.unassigned[unassigned_idx].clone();
+                    
+                    moves.push((
+                        group_idx,
+                        file_to_move,
+                        format!(
+                            "Added {} to commit \"{}\" based on relationship with {}",
+                            related_path.display(),
+                            group.message,
+                            file.path.display()
+                        )
+                    ));
+                }
+            }
+        }
+    }
+    
+    for (group_idx, file_to_move, warning) in moves {
+        if let Some(unassigned_idx) = new_plan.unassigned.iter().position(|f| f.path == file_to_move.path) {
+            new_plan.unassigned.remove(unassigned_idx);
+            new_plan.groups[group_idx].files.push(file_to_move);
+            new_plan.warnings.push(warning);
+        }
+    }
+    
+    new_plan
 }
 
 #[cfg(test)]
@@ -303,7 +345,41 @@ mod tests {
 
         assert!(
             plan.groups[0].files.is_empty(),
-);
+        );
         assert_eq!(plan.unassigned, vec![file("src/auth.rs")]);
+    }
+
+    #[test]
+    fn relationship_enhancement_moves_related_files() {
+        use crate::{RelationshipGraph, RelationshipType, EvidenceSource};
+        use std::path::PathBuf;
+
+        let messages = vec![message("Fix authentication")];
+        let files = vec![
+            file("src/auth.rs"),
+            file("src/auth_test.rs"),
+        ];
+        let scores = vec![
+            score(0, 0, 0.9),
+            score(0, 1, 0.1),
+        ];
+
+        let plan = build_commit_plan(&messages, &files, &scores, MIN, MARGIN);
+        assert_eq!(plan.groups[0].files.len(), 1);
+        assert_eq!(plan.unassigned.len(), 1);
+
+        let mut graph = RelationshipGraph::new();
+        graph.add_relationship(crate::Relationship {
+            from: PathBuf::from("src/auth.rs"),
+            to: PathBuf::from("src/auth_test.rs"),
+            relationship_type: RelationshipType::TestCoverage,
+            evidence: EvidenceSource::Deterministic("test".to_string()),
+            confidence: 0.9,
+        });
+
+        let enhanced = enhance_plan_with_relationships(plan, &graph, MIN);
+        assert_eq!(enhanced.groups[0].files.len(), 2);
+        assert_eq!(enhanced.unassigned.len(), 0);
+        assert!(enhanced.warnings.iter().any(|w| w.contains("based on relationship")));
     }
 }

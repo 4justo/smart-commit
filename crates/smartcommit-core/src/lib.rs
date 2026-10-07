@@ -38,7 +38,7 @@ pub use operation_record::{
     load_last_operation_record, save_operation_record, OperationRecord, OperationRecordError,
     OperationStatus,
 };
-pub use planner::{build_commit_plan, CommitGroup, CommitPlan};
+pub use planner::{build_commit_plan, enhance_plan_with_relationships, CommitGroup, CommitPlan};
 pub use repository::{Repository, RepositoryError, RepositoryInfo};
 pub use repository_state::{
     inspect_repository_state, InspectorError, RepositorySafety, RepositoryState,
