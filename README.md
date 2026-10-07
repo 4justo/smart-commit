@@ -187,12 +187,61 @@ temperature = 0.7
 | 2 | User declined the confirmation prompt |
 | 3 | Execution failed partway (some commits were created — see the report and recovery checkpoint) |
 
-## Building
+## Installation
+
+### Pre-built Binaries (Recommended)
+
+Download the latest release for your platform:
 
 ```bash
-cargo build --workspace
-cargo test --workspace
+# Linux (x86_64)
+curl -L https://github.com/4justo/smart-commit/releases/latest/download/smartcommit-linux-x86_64 -o smc
+chmod +x smc
+sudo mv smc /usr/local/bin/
+
+# macOS (Apple Silicon)
+curl -L https://github.com/4justo/smart-commit/releases/latest/download/smartcommit-darwin-aarch64 -o smc
+chmod +x smc
+sudo mv smc /usr/local/bin/
+
+# macOS (Intel)
+curl -L https://github.com/4justo/smart-commit/releases/latest/download/smartcommit-darwin-x86_64 -o smc
+chmod +x smc
+sudo mv smc /usr/local/bin/
 ```
+
+### Quick Start
+
+```bash
+# Set your AI provider API key
+export ANTHROPIC_API_KEY="your-key"  # for Claude
+# or
+export OPENAI_API_KEY="your-key"     # for OpenAI
+# or
+export GEMINI_API_KEY="your-key"     # for Gemini
+
+# Stage your changes
+git add .
+
+# Preview the commit plan (AI generates messages automatically)
+smc plan
+
+# Create the commits
+smc commit
+```
+
+That's it! SmartCommit works like Git - just stage your changes and run `smc commit`.
+
+### Build from Source
+
+If you prefer to build from source:
+
+```bash
+cargo build --workspace --release
+cargo install --path crates/smartcommit-cli
+```
+
+## Building
 
 ## Project layout
 
