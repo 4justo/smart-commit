@@ -72,6 +72,8 @@ fn write_file(path: &Path, contents: &str) {
 fn repo_with_plannable_staged_changes(label: &str) -> PathBuf {
     let dir = temp_dir(label);
     git(&dir, &["init", "--quiet"]);
+    git(&dir, &["config", "user.name", "Test User"]);
+    git(&dir, &["config", "user.email", "test@example.com"]);
     write_file(&dir.join("README.md"), "placeholder\n");
     git(&dir, &["add", "README.md"]);
     git(&dir, &["commit", "--quiet", "-m", "initial commit"]);
@@ -164,6 +166,8 @@ fn plan_builds_a_commit_plan_from_staged_changes() {
 fn plan_reports_no_staged_changes() {
     let dir = temp_dir("plan-no-staged");
     git(&dir, &["init", "--quiet"]);
+    git(&dir, &["config", "user.name", "Test User"]);
+    git(&dir, &["config", "user.email", "test@example.com"]);
     write_file(&dir.join("README.md"), "placeholder\n");
     git(&dir, &["add", "README.md"]);
     git(&dir, &["commit", "--quiet", "-m", "initial commit"]);
@@ -202,6 +206,8 @@ fn plan_rejects_empty_messages_file() {
     // working directory the way an earlier version of this test did.
     let dir = temp_dir("plan-empty-messages");
     git(&dir, &["init", "--quiet"]);
+    git(&dir, &["config", "user.name", "Test User"]);
+    git(&dir, &["config", "user.email", "test@example.com"]);
     write_file(&dir.join("a.txt"), "1\n");
     git(&dir, &["add", "a.txt"]);
     git(&dir, &["commit", "--quiet", "-m", "init"]);
@@ -232,6 +238,8 @@ fn plan_rejects_empty_messages_file() {
 fn plan_refuses_when_repository_is_blocked_by_a_merge_conflict() {
     let dir = temp_dir("plan-blocked");
     git(&dir, &["init", "--quiet"]);
+    git(&dir, &["config", "user.name", "Test User"]);
+    git(&dir, &["config", "user.email", "test@example.com"]);
     write_file(&dir.join("conflict.txt"), "base\n");
     git(&dir, &["add", "conflict.txt"]);
     git(&dir, &["commit", "--quiet", "-m", "base"]);
@@ -519,6 +527,8 @@ fn restore_refuses_when_a_later_commit_exists() {
 fn restore_reports_no_operation_when_none_exists() {
     let dir = temp_dir("restore-none");
     git(&dir, &["init", "--quiet"]);
+    git(&dir, &["config", "user.name", "Test User"]);
+    git(&dir, &["config", "user.email", "test@example.com"]);
     write_file(&dir.join("a.txt"), "1\n");
     git(&dir, &["add", "a.txt"]);
     git(&dir, &["commit", "--quiet", "-m", "init"]);
