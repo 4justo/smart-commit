@@ -19,6 +19,7 @@ pub struct AIConfig {
 pub enum ProviderType {
     Claude,
     OpenAI,
+    Gemini,
     Local,
 }
 
@@ -29,6 +30,8 @@ pub struct ModelSelection {
 
     pub openai: Option<String>,
 
+    pub gemini: Option<String>,
+
     pub local: Option<String>,
 }
 
@@ -38,6 +41,8 @@ pub struct ApiConfig {
     pub claude_api_key: Option<String>,
 
     pub openai_api_key: Option<String>,
+
+    pub gemini_api_key: Option<String>,
 
     pub local_base_url: Option<String>,
 }
@@ -64,11 +69,13 @@ impl Default for AIConfig {
             model: ModelSelection {
                 claude: Some("claude-3-sonnet-20240229".to_string()),
                 openai: Some("gpt-4-turbo-preview".to_string()),
+                gemini: Some("gemini-1.5-pro".to_string()),
                 local: Some("llama2".to_string()),
             },
             api: ApiConfig {
                 claude_api_key: None,
                 openai_api_key: None,
+                gemini_api_key: None,
                 local_base_url: Some("http://localhost:11434".to_string()),
             },
             generation: GenerationConfig {
@@ -98,10 +105,15 @@ pub fn load_ai_config_from_env() -> AIConfig {
         config.api.local_base_url = Some(local_url);
     }
 
+    if let Ok(gemini_key) = std::env::var("GEMINI_API_KEY") {
+        config.api.gemini_api_key = Some(gemini_key);
+    }
+
     if let Ok(provider) = std::env::var("SMC_AI_PROVIDER") {
         config.provider = match provider.to_lowercase().as_str() {
             "claude" => ProviderType::Claude,
             "openai" => ProviderType::OpenAI,
+            "gemini" => ProviderType::Gemini,
             "local" => ProviderType::Local,
             _ => config.provider,
         };
@@ -143,6 +155,16 @@ pub fn validate_ai_config(config: &AIConfig) -> Result<(), String> {
                 return Err("Local provider requires OLLAMA_BASE_URL to be set".to_string());
             }
         }
+        ProviderType::Gemini => {
+            if config
+                .api
+                .gemini_api_key
+                .as_ref()
+                .map_or(true, |k| k.is_empty())
+            {
+                return Err("Gemini provider requires GEMINI_API_KEY to be set".to_string());
+            }
+        }
     }
 
     Ok(())
@@ -166,5 +188,10 @@ pub fn get_model_for_provider(config: &AIConfig) -> Result<String, String> {
             .local
             .clone()
             .ok_or_else(|| "Local model not specified".to_string()),
+        ProviderType::Gemini => config
+            .model
+            .gemini
+            .clone()
+            .ok_or_else(|| "Gemini model not specified".to_string()),
     }
 }

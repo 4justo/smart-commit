@@ -2,8 +2,8 @@
 use super::config::{AIConfig, ProviderType};
 #[cfg(feature = "ai")]
 use super::provider::{
-    AIProvider, ClaudeProvider, LocalLLMProvider, MessageRequest, MessageResponse, OpenAIProvider,
-    ProviderError,
+    AIProvider, ClaudeProvider, GeminiProvider, LocalLLMProvider, MessageRequest, MessageResponse,
+    OpenAIProvider, ProviderError,
 };
 #[cfg(feature = "ai")]
 use std::sync::Arc;
@@ -62,6 +62,23 @@ pub fn create_provider(config: &AIConfig) -> Result<Arc<dyn AIProvider>, String>
                 model.clone(),
             )))
         }
+        ProviderType::Gemini => {
+            let api_key = config
+                .api
+                .gemini_api_key
+                .as_ref()
+                .ok_or("Gemini API key not configured")?;
+            let model = config
+                .model
+                .gemini
+                .as_ref()
+                .ok_or("Gemini model not specified")?;
+
+            Ok(Arc::new(GeminiProvider::new(
+                api_key.clone(),
+                model.clone(),
+            )))
+        }
     }
 }
 
@@ -74,6 +91,7 @@ pub fn create_provider_with_fallback(config: &AIConfig) -> Arc<dyn AIProvider> {
     let fallback_configs = vec![
         (ProviderType::Claude, "claude"),
         (ProviderType::OpenAI, "openai"),
+        (ProviderType::Gemini, "gemini"),
         (ProviderType::Local, "local"),
     ];
 

@@ -280,6 +280,106 @@ pub struct LocalLLMProvider {
 }
 
 #[cfg(feature = "ai")]
+pub struct GeminiProvider {
+    api_key: String,
+    model: String,
+    client: reqwest::Client,
+}
+
+#[cfg(feature = "ai")]
+impl GeminiProvider {
+    pub fn new(api_key: String, model: String) -> Self {
+        Self {
+            api_key,
+            model,
+            client: reqwest::Client::new(),
+        }
+    }
+}
+
+#[cfg(feature = "ai")]
+#[async_trait]
+impl AIProvider for GeminiProvider {
+    async fn generate_message(
+        &self,
+        request: &MessageRequest,
+    ) -> Result<MessageResponse, ProviderError> {
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            self.model, self.api_key
+        );
+
+        let body = serde_json::json!({
+            "contents": [{
+                "parts": [{
+                    "text": format!("{}\n\n{}", request.system_prompt, request.user_prompt)
+                }]
+            }],
+            "generationConfig": {
+                "temperature": request.temperature.unwrap_or(0.7),
+                "maxOutputTokens": request.max_tokens.unwrap_or(1024)
+            }
+        });
+
+        let response = self
+            .client
+            .post(&url)
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| ProviderError::NetworkError(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return match status.as_u16() {
+                401 => Err(ProviderError::AuthenticationFailed(error_text)),
+                429 => Err(ProviderError::RateLimitExceeded(error_text)),
+                _ => Err(ProviderError::RequestFailed(format!(
+                    "{}: {}",
+                    status, error_text
+                ))),
+            };
+        }
+
+        let json: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| ProviderError::InvalidResponse(e.to_string()))?;
+
+        let content = json["candidates"][0]["content"]["parts"][0]["text"]
+            .as_str()
+            .ok_or_else(|| {
+                ProviderError::InvalidResponse("Missing content in response".to_string())
+            })?
+            .to_string();
+
+        let usage = json.get("usageMetadata").and_then(|u| {
+            Some(TokenUsage {
+                prompt_tokens: u["promptTokenCount"].as_u64()? as u32,
+                completion_tokens: u["candidatesTokenCount"].as_u64()? as u32,
+                total_tokens: u["totalTokenCount"].as_u64()? as u32,
+            })
+        });
+
+        Ok(MessageResponse {
+            content,
+            usage,
+            model: self.model.clone(),
+        })
+    }
+
+    fn provider_name(&self) -> &'static str {
+        "gemini"
+    }
+
+    fn is_configured(&self) -> bool {
+        !self.api_key.is_empty()
+    }
+}
+
+#[cfg(feature = "ai")]
 impl LocalLLMProvider {
     pub fn new(base_url: String, model: String) -> Self {
         Self {
