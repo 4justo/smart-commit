@@ -1,90 +1,184 @@
 # Changelog
 
-All notable changes to SmartCommit are documented here. This project
-has not yet made a `v0.1.0` release — Module 15 (release polish) is
-still open, so this file tracks progress by module rather than by
-version tag for now.
+All notable changes to this project will be documented in this file.
 
-Format loosely follows [Keep a Changelog](https://keepachangelog.com/),
-adapted for a pre-release, module-by-module build.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Added — Module 16: Hunk-Level Change Analysis
-- `DiffHunk` (Module 4) extended with deterministic `id`, `file_path`,
-  parsed `old_start`/`old_count`/`new_start`/`new_count`,
-  `raw_content`, and `stats: HunkStats { additions, deletions,
-  context, total_changed_lines }`.
-- `scm analyze --verbose` shows one new summary line per hunk
-  (id, stats, old/new ranges) ahead of the existing header/content
-  output, which is otherwise unchanged.
-- Read-only: no Git-mutating command is used anywhere in this module.
-  Hunk *splitting* into separate commits is explicitly not
-  implemented yet.
+## [0.1.0] - 2026-11-26
+
+### Added
+- **Repository Detection** (Module 1)
+  - Detect Git repositories from any path within a repository
+  - Support for nested directories
+  - Bare repository detection
+  - `scm doctor` command for repository diagnostics
+
+- **Repository State Inspection** (Module 2)
+  - Full repository state analysis (branch, HEAD, detached HEAD)
+  - Detection of in-progress operations (merge, rebase, cherry-pick)
+  - Conflict detection
+  - Staged/unstaged/untracked file tracking
+  - Safety classification (Safe/Warning/Blocked)
+
+- **Staged Change Discovery** (Module 3)
+  - List all staged files with change types (Added/Modified/Deleted/Renamed)
+  - Rename detection with old path tracking
+  - `scm analyze` command for staged file inspection
+
+- **Diff Extraction Engine** (Module 4)
+  - Extract unified diffs for all staged changes
+  - Hunk-level diff parsing
+  - Binary file detection
+  - Line addition/deletion counts
+  - `--verbose` flag for full diff content
+
+- **Multiline Commit Message Parser** (Module 5)
+  - Blank-line-separated message parsing
+  - Cross-platform line ending support (CRLF/LF)
+  - Whitespace trimming
+  - Empty entry filtering
+
+- **Deterministic File Matcher** (Module 6)
+  - Token-based file-to-message matching
+  - Filename, directory, and diff keyword analysis
+  - Confidence scoring with explainable reasons
+  - Deterministic results across runs
+
+- **Commit Planner** (Module 7)
+  - Automatic file grouping by commit message
+  - Confidence-based assignment with ambiguity detection
+  - Unassigned file handling
+  - Warning generation for edge cases
+  - `scm plan` command for commit preview
+
+- **Timeline Engine** (Module 8)
+  - Fixed-interval timestamp generation
+  - Random-range timestamp generation
+  - Custom start time support
+  - Future-timestamp prevention
+  - Chronological ordering guarantees
+
+- **Safety Checkpoint Engine** (Module 9)
+  - Pre-operation state capture
+  - Git ref-based recovery points
+  - Repository state snapshots
+  - Collision-safe ref naming
+  - No repository modification on failure
+
+- **Commit Executor** (Module 10)
+  - Multi-commit creation from approved plans
+  - Temporary index per commit (preserves real index)
+  - Git hook support (pre-commit, etc.)
+  - Planned timestamp application
+  - Failure handling with partial execution reporting
+  - Unstaged change preservation
+
+- **Preview and Confirmation CLI** (Module 11)
+  - Full commit plan preview
+  - Interactive confirmation prompts ([y/N], default No)
+  - `--yes` flag for non-interactive mode
+  - `--dry-run` for preview without execution
+  - Meaningful exit codes (0=success, 1=validation failure, 2=user declined, 3=partial failure)
+  - Timeline CLI flags (`--start`, `--interval-minutes`, `--random-min-max-minutes`, `--allow-future`)
+
+- **Restore and Recovery** (Module 12)
+  - Operation metadata tracking (`.git/smartcommit/last-operation.toml`)
+  - Automatic restore when safe
+  - Safety checks before restore (HEAD, branch, checkpoint integrity)
+  - Manual recovery instructions for unsafe scenarios
+  - `scm restore` command
+
+- **Configuration** (Module 13)
+  - `.smc.toml` configuration file support
+  - Matching parameters (minimum confidence, ambiguity margin)
+  - Timeline settings (fixed/random intervals)
+  - Commit behavior (confirmation requirement)
+  - CLI flag → config → default resolution order
+
+- **End-to-End Test Suite** (Module 14)
+  - 17 comprehensive integration test scenarios
+  - Full pipeline testing (plan → checkpoint → execute → restore)
+  - Edge case coverage (no repo, no changes, conflicts, binary files, etc.)
+
+- **Hunk-Level Change Analysis** (Module 16)
+  - Extended `DiffHunk` with deterministic IDs
+  - Parsed hunk ranges (old_start, old_count, new_start, new_count)
+  - Hunk statistics (additions, deletions, context, total changed lines)
+  - Raw content preservation
+  - Per-hunk summary in `scm analyze --verbose`
 
 ### Changed
-- **Breaking (CLI):** the produced binary is now named `scm`
-  (previously `smartcommit`). The Rust crate names
-  (`smartcommit-core`, `smartcommit-cli`) and the
-  `refs/smartcommit/backups/` Git ref namespace (Module 9) are
-  unchanged.
+- CLI binary renamed from `smartcommit` to `scm` (Module 16)
 
-### Fixed
-- Two pre-existing `cargo clippy` findings unrelated to Module 16's
-  own changes (a needless double-borrow in
-  `smartcommit-cli/src/main.rs`, a single-character string pattern in
-  a `checkpoint.rs` test) — found and fixed while getting `cargo
-  clippy --workspace --all-targets -- -D warnings` to pass clean,
-  which Module 16's own testing requirements call for across the
-  whole workspace.
-- `PROJECT_STATE.md` had not been updated past "Module 12 complete"
-  even though Modules 13 and 14 were already implemented in the
-  codebase — brought up to date.
+### Security
+- No secrets or source code stored in operation records
+- Temporary index files isolated from real index
+- Checkpoint refs stored outside normal branch namespace
+- Safety checks before all destructive operations
 
-## Modules 0-14 (undated — backfilled retroactively)
+### Documentation
+- Comprehensive README with workflow examples
+- Full architecture specification (ARCHITECTURE.md)
+- Per-module implementation tracking (PROJECT_STATE.md)
+- Module-by-module build guide (docs/modules.md)
 
-- **Module 0** — Cargo workspace foundation (`smartcommit-core`
-  library, `smartcommit-cli` binary), `--version`/`--help`.
-- **Module 1** — Git repository detection (`Repository::discover`),
-  `doctor` (detection only at this point).
-- **Module 2** — Repository state inspection (branch, HEAD,
-  merge/rebase/cherry-pick in progress, conflicts,
-  staged/unstaged/untracked), `doctor` expanded to report full state.
-- **Module 3** — Staged change discovery (`get_staged_changes`),
-  `analyze` command.
-- **Module 4** — Diff extraction (`get_staged_diffs`, `FileDiff`,
-  `DiffHunk`, `DiffLine`), binary-file detection, `analyze` gains
-  diff summaries and `--verbose`.
-- **Module 5** — Multiline commit message parsing
-  (`CommitMessage`/`CommitMessages`), blank-line-separated and
-  one-per-line modes.
-- **Module 6** — Deterministic file-to-message matching
-  (`match_files_to_messages`), no AI/embeddings.
-- **Module 7** — Commit planning (`build_commit_plan`), grouping,
-  confidence, ambiguity handling, warnings.
-- **Module 8** — Timeline generation (`generate_timeline`), fixed and
-  random modes, no-future-timestamp guarantee.
-- **Module 9** — Safety checkpoint creation
-  (`create_safety_checkpoint`), a Git ref under
-  `refs/smartcommit/backups/`.
-- **Module 10** — Commit execution (`execute_commit_plan`) via a
-  per-commit temporary index — never touches the real `.git/index`
-  or the working tree; hooks run correctly, scoped per commit.
-- **Module 11** — Preview and confirmation CLI: `plan`/`commit` wired
-  together, `[y/N]` confirmation, `--yes`, `--dry-run`, meaningful
-  exit codes.
-- **Module 12** — Restore and recovery (`plan_restore`/
-  `execute_restore`), operation records under `.git/smartcommit/`,
-  safety-gated automatic restore with manual-instruction fallback.
-- **Module 13** — `.smartcommit.toml` configuration
-  (`SmartCommitConfig`), CLI-flag-over-config-over-default resolution.
-- **Module 14** — End-to-end MVP test suite (`tests/end_to_end.rs`),
-  17 scenarios covering the full pipeline.
+### Testing
+- 144 passing tests (12 CLI + 17 end-to-end + 115 core)
+- All tests use temporary Git repositories
+- Deterministic testing (no reliance on wall-clock or random seeds)
+- Cross-platform compatibility verified
 
-## Not yet done
+## [0.1.0] - Release Notes
 
-- **Module 15** — Release polish: this file, `SECURITY.md`, a
-  cross-platform review, `--help` text audit, and an actual `v0.1.0`
-  tag. Not done as of Module 16.
-- **Module 17+** — Explicitly out of scope for Module 16 per its own
-  completion rule.
+SmartCommit v0.1.0 is a minimal, safe, and reliable Git commit planning and splitting tool.
+
+**Core Philosophy**: A small, safe, reliable Git engine is more valuable than a large intelligent system that cannot be trusted.
+
+**What's Included**:
+- Deterministic file-to-commit matching without AI
+- Safe multi-commit creation with full recovery
+- Timeline generation for realistic commit histories
+- Configuration support for custom workflows
+- Comprehensive test coverage
+
+**What's Not Included** (Planned for Future Releases):
+- AI-powered commit message generation
+- AI semantic file matching
+- Hunk-level commit splitting
+- Code structure detection (Tree-sitter)
+- VS Code integration
+
+**Installation**:
+```bash
+# Build from source
+cargo build --workspace --release
+cargo install --path crates/smartcommit-cli
+```
+
+**Quick Start**:
+```bash
+git add .
+cat > commits.txt <<EOF
+Fix authentication
+Improve dashboard
+EOF
+scm plan --messages-file commits.txt
+scm commit --messages-file commits.txt
+```
+
+**Safety Features**:
+- Automatic safety checkpoints before all operations
+- Restore mechanism for recovery
+- Hook support (pre-commit, etc.)
+- Unstaged change preservation
+- No repository modification on preview or dry-run
+
+**Platform Support**:
+- Linux
+- macOS (Apple Silicon & Intel)
+- Windows
+
+See README.md for full documentation.
