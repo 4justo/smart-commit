@@ -230,7 +230,6 @@ mod tests {
                 lines,
                 raw_content: String::new(),
                 stats: Default::default(),
-                structures: vec![],
             }],
             additions: added_lines.len(),
             deletions: 0,
