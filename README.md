@@ -6,11 +6,7 @@ describe the several logical commits hidden inside that batch in plain
 text, and have SmartCommit propose — and, once approved, create — those
 commits safely.
 
-**NEW: AI-Powered Features**
-SmartCommit now includes AI capabilities for automatic commit message generation
-and semantic file-to-commit matching using multiple AI providers (Claude, OpenAI, local LLMs).
-
-**Status: MVP complete through Module 14 (end-to-end test suite) with AI integration (Module 15+).**
+**Status: MVP complete through Module 16 (hunk-level change analysis).**
 The full pipeline — planning, configuration, committing, restore, and
 automated testing — is implemented and passing.
 
@@ -28,25 +24,19 @@ All commands above are real and tested end to end.
 
 ## Workflow
 
-### Automatic AI-generated commit messages (Git-like workflow)
-
 ```bash
 git add .
 
-# Preview with automatic AI message generation
-smc plan
+# preview only — makes no Git modification
+smc plan --messages-file commits.txt
 
-# Review the proposed grouping and timeline, then create the commits
-smc commit
+# review the proposed grouping and timeline, then create the commits
+smc commit --messages-file commits.txt
 # or skip the confirmation prompt:
-smc commit --yes
+smc commit --messages-file commits.txt --yes
 # or preview without committing anything:
-smc commit --dry-run
+smc commit --messages-file commits.txt --dry-run
 ```
-
-When you omit `--messages-file`, SmartCommit automatically generates commit messages using AI from your staged changes.
-
-### Manual commit messages (explicit control)
 
 ```bash
 git add .
@@ -99,43 +89,6 @@ With no `--start`, the *last* commit is anchored at the current time
 and earlier commits are placed backward — this can never produce a
 future timestamp.
 
-### AI Features
-
-SmartCommit automatically generates commit messages using AI when you omit `--messages-file`:
-
-```bash
-# Automatic AI generation (Git-like workflow)
-smc plan
-smc commit
-```
-
-**AI Configuration:**
-
-Set environment variables to configure AI providers:
-
-```bash
-# For Claude (Anthropic)
-export ANTHROPIC_API_KEY="your-api-key"
-
-# For OpenAI
-export OPENAI_API_KEY="your-api-key"
-
-# For local LLM (Ollama)
-export OLLAMA_BASE_URL="http://localhost:11434"
-
-# Choose provider (optional, defaults to claude)
-export SMC_AI_PROVIDER="claude|openai|local"
-```
-
-**AI Features:**
-- **Automatic message generation**: AI analyzes your code changes and writes conventional commit messages
-- **Semantic file matching**: AI understands the actual meaning of changes and groups files intelligently
-- **Multiple providers**: Support for Claude, OpenAI, and local LLMs (Ollama)
-- **Fallback mechanism**: Automatically falls back to keyword matching if AI fails
-- **Privacy-focused**: Option to use local LLMs for sensitive codebases
-
-**Note:** AI features are optional. SmartCommit works perfectly without AI using the original keyword-based matching system, or you can provide explicit commit messages with `--messages-file`.
-
 ### Configuration
 
 Place a `.smc.toml` at your repository root to tune default
@@ -158,25 +111,6 @@ require_confirmation = true # set to false to skip the [y/N] prompt by default
 
 All sections and fields are optional. Missing fields fall back to the
 built-in defaults. CLI flags always override config values.
-
-For AI configuration, you can also add an `[ai]` section to `.smc.toml`:
-
-```toml
-[ai]
-provider = "claude"  # claude, openai, or local
-enable_message_generation = true
-enable_semantic_matching = true
-fallback_to_keywords = true
-
-[ai.model]
-claude = "claude-3-sonnet-20240229"
-openai = "gpt-4-turbo-preview"
-local = "llama2"
-
-[ai.generation]
-max_tokens = 1024
-temperature = 0.7
-```
 
 ### Exit codes
 
@@ -217,24 +151,22 @@ Invoke-WebRequest -Uri "https://github.com/4justo/smart-commit/releases/latest/d
 ### Quick Start
 
 ```bash
-# Set your AI provider API key
-export ANTHROPIC_API_KEY="your-key"  # for Claude
-# or
-export OPENAI_API_KEY="your-key"     # for OpenAI
-# or
-export GEMINI_API_KEY="your-key"     # for Gemini
-
 # Stage your changes
 git add .
 
-# Preview the commit plan (AI generates messages automatically)
-smc plan
+# Write your intended commit messages (blank-line-separated)
+cat > commits.txt <<EOF
+Fix authentication in login module
+
+Improve dashboard widgets
+EOF
+
+# Preview the commit plan
+smc plan --messages-file commits.txt
 
 # Create the commits
-smc commit
+smc commit --messages-file commits.txt
 ```
-
-That's it! SmartCommit works like Git - just stage your changes and run `smc commit`.
 
 ### Build from Source
 
@@ -244,8 +176,6 @@ If you prefer to build from source:
 cargo build --workspace --release
 cargo install --path crates/smartcommit-cli
 ```
-
-## Building
 
 ## Project layout
 
@@ -268,3 +198,15 @@ smartcommit/
 
 The `smartcommit-core` library remains usable without AI or any external LLM,
 and is independent of the CLI.
+
+## Planned Features (Not Yet Implemented)
+
+The following features are planned for future releases but are not yet available in v0.1.0:
+
+- **AI-powered commit message generation**: Automatic generation of conventional commit messages using Claude, OpenAI, or local LLMs
+- **AI semantic file matching**: Enhanced file-to-commit grouping based on code meaning
+- **Hunk-level commit splitting**: Splitting individual files across multiple commits based on logical code changes
+- **Code structure detection**: Understanding functions, classes, and modules using Tree-sitter
+- **VS Code integration**: Direct editor integration for commit planning
+
+See `docs/modules.md` for the full roadmap.

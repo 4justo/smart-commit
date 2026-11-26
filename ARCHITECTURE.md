@@ -6,7 +6,7 @@
 **Language:** Rust  
 **Architecture:** Modular CLI-first application  
 **Current Target:** MVP / v0.1  
-**Status:** Early Development
+**Status:** Release Candidate (Modules 0-16 complete)
 
 ---
 
@@ -2224,9 +2224,9 @@ crates/
 ```
 
 This matches §6's target layout. `tests/`, `fixtures/`, and `docs/`
-exist as specified; `CONTRIBUTING.md`, `SECURITY.md`, and
-`CHANGELOG.md` are not yet created (deferred until Module 15 per the
-module build order — no functionality depends on them yet).
+exist as specified. `SECURITY.md` and `CHANGELOG.md` were created in
+Module 15 (MVP polish). `CONTRIBUTING.md` remains deferred to a future
+release.
 
 ## Dependency policy in practice
 
