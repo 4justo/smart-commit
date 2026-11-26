@@ -22,15 +22,6 @@ use smartcommit_core::{
     RestoreError, RestorePlan, StagedChangesError, SystemRandomSource, TimelineMode, Utc,
 };
 
-#[cfg(feature = "ai")]
-use smartcommit_core::ai::{
-    analyze_hunks, create_provider_with_fallback, generate_commit_messages,
-    load_ai_config_from_env, validate_ai_config,
-};
-
-#[cfg(feature = "ai")]
-use tokio::runtime::Runtime;
-
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -65,17 +56,11 @@ enum Commands {
         /// for every non-binary file, not just the summary.
         #[arg(long)]
         verbose: bool,
-
-        /// Use AI to perform semantic hunk analysis
-        #[cfg(feature = "ai")]
-        #[arg(long)]
-        ai: bool,
     },
     /// Preview a commit plan from a messages file and the currently
     /// staged changes. Read-only — makes no Git modification.
-    /// If no messages file is provided, AI will automatically generate commit messages.
     Plan {
-        /// Path to a text file containing commit messages. If omitted, AI generates messages.
+        /// Path to a text file containing commit messages.
         #[arg(long, value_name = "FILE")]
         messages_file: Option<PathBuf>,
 
@@ -83,9 +68,9 @@ enum Commands {
         timeline: TimelineArgs,
     },
     /// Build a commit plan and, after confirmation, create the
-    /// commits for real. If no messages file is provided, AI will automatically generate commit messages.
+    /// commits for real.
     Commit {
-        /// Path to a text file containing commit messages. If omitted, AI generates messages.
+        /// Path to a text file containing commit messages.
         #[arg(long, value_name = "FILE")]
         messages_file: Option<PathBuf>,
 
@@ -222,10 +207,7 @@ fn main() -> ExitCode {
 
     match cli.command {
         Commands::Doctor => run_doctor(cli.repo),
-        #[cfg(feature = "ai")]
-        Commands::Analyze { verbose, ai } => run_analyze(cli.repo, verbose, ai),
-        #[cfg(not(feature = "ai"))]
-        Commands::Analyze { verbose, .. } => run_analyze(cli.repo, verbose, false),
+        Commands::Analyze { verbose } => run_analyze(cli.repo, verbose),
         Commands::Plan {
             messages_file,
             timeline,
@@ -279,97 +261,7 @@ fn run_doctor(repo_path: Option<PathBuf>) -> ExitCode {
     }
 }
 
-#[cfg(feature = "ai")]
-fn run_analyze(repo_path: Option<PathBuf>, verbose: bool, ai: bool) -> ExitCode {
-    let target = match resolve_target(repo_path) {
-        Ok(t) => t,
-        Err(code) => return code,
-    };
-
-    let files = match get_staged_changes(&target) {
-        Ok(files) if files.is_empty() => {
-            println!("No staged changes found.");
-            return ExitCode::FAILURE;
-        }
-        Ok(files) => files,
-        Err(e) => return report_staged_changes_error(e),
-    };
-
-    // A diff-extraction failure shouldn't hide the file list we
-    // already have from get_staged_changes — fall back to listing
-    // files without diff stats rather than losing the whole
-    // command's output over a secondary failure.
-    let diffs = match get_staged_diffs(&target) {
-        Ok(diffs) => diffs,
-        Err(e) => {
-            eprintln!("Warning: could not extract diff content ({e}); showing file list only.");
-            Vec::new()
-        }
-    };
-
-    println!("Staged changes: {}", files.len());
-    println!();
-
-    // Perform AI hunk analysis if requested
-    if ai {
-        println!("AI Hunk Analysis");
-        println!("================");
-        println!();
-
-        let ai_config = load_ai_config_from_env();
-        if let Err(e) = validate_ai_config(&ai_config) {
-            eprintln!("AI configuration error: {e}");
-            eprintln!("Please set the required environment variables for your chosen provider.");
-            eprintln!("Supported providers: claude (ANTHROPIC_API_KEY), openai (OPENAI_API_KEY), local (OLLAMA_BASE_URL)");
-            return ExitCode::FAILURE;
-        }
-
-        let provider = create_provider_with_fallback(&ai_config);
-        let rt = Runtime::new().expect("Failed to create Tokio runtime");
-
-        let analysis =
-            rt.block_on(async { analyze_hunks(&diffs, &ai_config, provider.as_ref()).await });
-
-        match analysis {
-            Ok(diff_analysis) => {
-                print_ai_analysis(&diff_analysis);
-                println!();
-            }
-            Err(e) => {
-                eprintln!("AI analysis failed: {e}");
-                eprintln!("Falling back to standard analysis.");
-                println!();
-            }
-        }
-    }
-
-    for file in &files {
-        let label = match file.change_kind {
-            ChangeKind::Added => "Added",
-            ChangeKind::Modified => "Modified",
-            ChangeKind::Deleted => "Deleted",
-            ChangeKind::Renamed => "Renamed",
-        };
-        match (&file.change_kind, &file.old_path) {
-            (ChangeKind::Renamed, Some(old)) => {
-                println!("{label:<9} {} -> {}", old.display(), file.path.display());
-            }
-            _ => {
-                println!("{label:<9} {}", file.path.display());
-            }
-        }
-
-        if let Some(diff) = diffs.iter().find(|d| d.path == file.path) {
-            print_diff_summary(diff, verbose);
-        }
-        println!();
-    }
-
-    ExitCode::SUCCESS
-}
-
-#[cfg(not(feature = "ai"))]
-fn run_analyze(repo_path: Option<PathBuf>, verbose: bool, _ai: bool) -> ExitCode {
+fn run_analyze(repo_path: Option<PathBuf>, verbose: bool) -> ExitCode {
     let target = match resolve_target(repo_path) {
         Ok(t) => t,
         Err(code) => return code,
@@ -452,7 +344,7 @@ struct Preview {
 /// flags always take precedence over config values.
 fn build_preview(
     repo_path: Option<PathBuf>,
-    messages_file: &Option<PathBuf>,
+    messages_file: PathBuf,
     timeline: &TimelineArgs,
     now: DateTime<FixedOffset>,
 ) -> Result<Preview, ExitCode> {
@@ -524,65 +416,23 @@ fn build_preview(
         }
     };
 
-    // Get commit messages - either from file or AI generation
-    let messages = match messages_file {
-        Some(file) => {
-            let text = fs::read_to_string(file).map_err(|err| {
-                eprintln!("Could not read messages file {}: {err}", file.display());
-                ExitCode::FAILURE
-            })?;
-            text.parse::<CommitMessages>().map_err(|err| {
-                let ParseCommitMessagesError::EmptyInput = err;
-                eprintln!(
-                    "Could not parse commit messages from {}: message input is empty",
-                    file.display()
-                );
-                ExitCode::FAILURE
-            })?
-        }
-        None => {
-            // Auto-generate messages using AI
-            let ai_config = load_ai_config_from_env();
-
-            // Validate AI configuration
-            if let Err(e) = validate_ai_config(&ai_config) {
-                eprintln!("AI configuration error: {e}");
-                eprintln!(
-                    "Please set the required environment variables for your chosen provider."
-                );
-                eprintln!("Supported providers: claude (ANTHROPIC_API_KEY), openai (OPENAI_API_KEY), local (OLLAMA_BASE_URL)");
-                return Err(ExitCode::FAILURE);
-            }
-
-            // Create provider with fallback
-            let provider = create_provider_with_fallback(&ai_config);
-
-            // Generate messages using AI
-            let rt = Runtime::new().map_err(|e| {
-                eprintln!("Failed to create async runtime: {e}");
-                ExitCode::FAILURE
-            })?;
-
-            let generated = rt.block_on(async {
-                generate_commit_messages(&diffs, &files, &ai_config, provider.as_ref()).await
-            });
-
-            let generated_messages = generated.map_err(|e| {
-                eprintln!("Failed to generate commit messages: {e}");
-                eprintln!(
-                    "You can provide a messages file manually using --messages-file instead."
-                );
-                ExitCode::FAILURE
-            })?;
-
-            // Convert Vec<String> to CommitMessages
-            let commit_messages: Vec<smartcommit_core::CommitMessage> = generated_messages
-                .into_iter()
-                .map(|text| smartcommit_core::CommitMessage { text })
-                .collect();
-
-            CommitMessages(commit_messages)
-        }
+    // Get commit messages from file
+    let messages = {
+        let text = fs::read_to_string(&messages_file).map_err(|err| {
+            eprintln!(
+                "Could not read messages file {}: {err}",
+                messages_file.display()
+            );
+            ExitCode::FAILURE
+        })?;
+        text.parse::<CommitMessages>().map_err(|err| {
+            let ParseCommitMessagesError::EmptyInput = err;
+            eprintln!(
+                "Could not parse commit messages from {}: message input is empty",
+                messages_file.display()
+            );
+            ExitCode::FAILURE
+        })?
     };
 
     let scores = match_files_to_messages(&messages.0, &files, &diffs);
@@ -691,7 +541,14 @@ fn run_plan(
     timeline: TimelineArgs,
 ) -> ExitCode {
     let now: DateTime<FixedOffset> = Utc::now().into();
-    let preview = match build_preview(repo_path, &messages_file, &timeline, now) {
+    let messages_file = match messages_file {
+        Some(f) => f,
+        None => {
+            eprintln!("--messages-file is required for plan command");
+            return ExitCode::FAILURE;
+        }
+    };
+    let preview = match build_preview(repo_path, messages_file, &timeline, now) {
         Ok(p) => p,
         Err(code) => return code,
     };
@@ -713,7 +570,15 @@ fn run_commit(
     let now_utc = Utc::now();
     let now: DateTime<FixedOffset> = now_utc.into();
 
-    let preview = match build_preview(repo_path, &messages_file, &timeline, now) {
+    let messages_file = match messages_file {
+        Some(f) => f,
+        None => {
+            eprintln!("--messages-file is required for commit command");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let preview = match build_preview(repo_path, messages_file, &timeline, now) {
         Ok(p) => p,
         Err(code) => return code,
     };
@@ -984,44 +849,6 @@ fn print_diff_summary(diff: &FileDiff, verbose: bool) {
                 }
             }
         }
-    }
-}
-
-#[cfg(feature = "ai")]
-fn print_ai_analysis(analysis: &smartcommit_core::ai::DiffAnalysis) {
-    println!("Overall Assessment:");
-    println!("  Complexity: {}/10", analysis.overall_complexity);
-    println!("  Risk Level: {:?}", analysis.overall_risk);
-    println!();
-
-    println!("Recommendations:");
-    for recommendation in &analysis.recommendations {
-        println!("  - {}", recommendation);
-    }
-    println!();
-
-    println!("Suggested Commit Groupings:");
-    for (i, group) in analysis.suggested_groups.iter().enumerate() {
-        println!("  Group {}:", i + 1);
-        for hunk_id in group {
-            println!("    - {}", hunk_id);
-        }
-    }
-    println!();
-
-    println!("Hunk-Level Analysis:");
-    for hunk_analysis in &analysis.hunk_analyses {
-        println!("  {}:", hunk_analysis.hunk_id);
-        println!("    Category: {:?}", hunk_analysis.category);
-        println!("    Risk: {:?}", hunk_analysis.risk_level);
-        println!("    Complexity: {}/10", hunk_analysis.complexity);
-        println!("    Description: {}", hunk_analysis.description);
-        println!("    Should split: {}", hunk_analysis.should_split);
-        if !hunk_analysis.related_hunks.is_empty() {
-            println!("    Related hunks: {:?}", hunk_analysis.related_hunks);
-        }
-        println!("    Reasoning: {}", hunk_analysis.reasoning);
-        println!();
     }
 }
 
